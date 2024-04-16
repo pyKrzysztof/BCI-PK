@@ -1,4 +1,3 @@
-import argparse
 import time
 import numpy as np
 import pandas as pd
@@ -7,10 +6,8 @@ from pprint import pprint
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
 from brainflow.data_filter import DataFilter
 
+from pipeline import PipelineEEG
 
-# temp
-def in_session(duration):
-    time.sleep(duration)
 
 
 # x:start_command | i: channel_index(1-8) | 0: on | 3: gain6(2 for 4, 4 for 8) | 0: adc_channel_input_source | 0: remove from BIAS | 1: SRB2 | 0: disconnect SRB1
@@ -26,18 +23,13 @@ class SessionEEG:
     # write_mode: str, can be "append" for extended sessions or "write" for single session files.
     # port: str, serial port, example: "COM3", "/dev/tty/USB0"
     # duration: num, session duration in seconds
-    def __init__(self, filename, training_pipeline, config=BASE_THINKPULSE_CONFIG_GAIN_6, write_mode="append", port="COM3", duration=10):
+    def __init__(self, config=BASE_THINKPULSE_CONFIG_GAIN_6, port="COM3"):
         self.params = BrainFlowInputParams()
         self.params.serial_port = port
-        self.filename = filename
-        self.duration = duration
         self.board = BoardShim(BoardIds.CYTON_BOARD.value, self.params)
         self.config = config
-        self.pipeline = training_pipeline
-        self.write_mode = "a" if write_mode == "append" else "w"
         
-        
-    def start_session(self):
+    def basic_stream_start(self):
         # prepare session
         self.board.prepare_session()
         # apply channel configuration
@@ -45,20 +37,34 @@ class SessionEEG:
             self.board.config_board(conf)
         # start stream
         self.board.start_stream()
-        
-        # timing the session, process the training pipeline and insert markers
-        in_session(self.duration)
-        
+    
+    def basic_stream_stop(self):
         # finish the session
         self.board.stop_stream()
-        
         # save data
         self.data = self.board.get_board_data()
-        DataFilter.write_file(self.data, self.filename, self.write_mode)
-        
         # release session
         self.board.release_session()
-    
+
+    def basic_stream(self, duration, filename=None, write_mode="w"):
+        self.basic_stream_start()
+        time.sleep(duration)
+        self.basic_stream_stop()
+        if filename is not None:
+            DataFilter.write_file(self.data, filename, write_mode)
+            print(f"Saved session data to {filename}\n")
+        else:
+            pprint(self.data)
+
+    def process_pipeline(self, pipeline : PipelineEEG , timeout=0):
+        # start the stream
+        pipeline.prepare()
+        self.basic_stream_start()
+        # process the pipeline
+        status = pipeline.start(self.board, timeout)
+        # return pipeline status
+        return status
+
     def process_data(self):
         self.data_df = pd.DataFrame(np.transpose(self.data))
         print(self.data_df)
@@ -67,7 +73,6 @@ class SessionEEG:
 def restore_data(filename):
     restored_data = DataFilter.read_file(filename)
     return pd.DataFrame(np.transpose(restored_data))
-
 
 def board_info():
     board_id = BoardIds.CYTON_BOARD.value
@@ -84,3 +89,5 @@ def board_info():
 #  'package_num_channel': 0,
 #  'sampling_rate': 250,
 #  'timestamp_channel': 22}
+
+# 'Fp1','Fp2','C3','C4','P7','P8','O1','O2'
