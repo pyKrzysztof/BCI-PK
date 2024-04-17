@@ -1,39 +1,50 @@
 import random as rd
 import time
 import numpy as np
-
+from pprint import pprint
 from brainflow.board_shim import BoardShim
+
+from action import ActionEEG
 
 
 
 class PipelineEEG:
 
-    def __init__(self, nSamples, tBetweenRange, actionHandles : list, markerValues : list, bias=None) -> None:
+    def __init__(self, nSamples, tBetweenRange, actionHandles : list[ActionEEG]) -> None:
         self.nSamples = nSamples
         self.actionHandles = actionHandles
         self.nActions = len(actionHandles)
-        self.markers = markerValues
         self.tb1 = tBetweenRange[0]
         self.tb2 = tBetweenRange[1]
-        self.bias = [1,]*self.nActions if not bias else bias
 
-        assert len(self.markers) == self.nActions
-
+    # this function should be called manually if not used together with SessionEEG
     def prepare(self):
-        # prepare randomized actions with bias
-        # create a handle generator, include marker values
-        pass
+        # prepare randomized actions and delays, return estimated session time and the action sequence.
+        delays = [rd.uniform(self.tb1, self.tb2) for _ in range(self.nSamples*self.nActions)]
+        actionMarkerPairs = [action for action in self.actionHandles for _ in range(self.nSamples)]
+        rd.shuffle(actionMarkerPairs)
+        self.action_sequence = list(zip(actionMarkerPairs, delays))
+        approx_time = sum([action.tHold + action.tWait for action in self.actionHandles]) + sum(delays)
+        print(f"Expected session time: {approx_time:.2f} seconds.")
+        return approx_time, self.action_sequence
+
 
     def start(self, boardHandle, timeout):
-        start_time = time.time
-        current_time = start_time
-
-        for action, marker in self.generated_actions:
-            PipelineEEG.insertMarker(boardHandle, marker)
+        for i, (action, delay) in enumerate(self.action_sequence):
+            action()
+            time.sleep(action.tWait)
+            PipelineEEG.insertMarker(boardHandle, action.marker)
+            time.sleep(action.tHold)
+            PipelineEEG.insertMarker(boardHandle, action.endMarker)
+            action.endHandle()
             
-
-        
+            if i == len(self.action_sequence)-1:
+                time.sleep(0.25)
+                continue
+            time.sleep(delay)
+            
+        return None
 
     @staticmethod
-    def insertMarker(boardHandle : BoardShim, value):
+    def insertMarker(boardHandle: BoardShim, value):
         boardHandle.insert_marker(value)

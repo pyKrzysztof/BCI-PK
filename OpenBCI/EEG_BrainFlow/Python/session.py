@@ -10,25 +10,22 @@ from pipeline import PipelineEEG
 
 
 
-# x:start_command | i: channel_index(1-8) | 0: on | 3: gain6(2 for 4, 4 for 8) | 0: adc_channel_input_source | 0: remove from BIAS | 1: SRB2 | 0: disconnect SRB1
-BASE_THINKPULSE_CONFIG_GAIN_4 = [f"x{i}020010X" for i in range(1, 9)]
-BASE_THINKPULSE_CONFIG_GAIN_6 = [f"x{i}030010X" for i in range(1, 9)]
-BASE_THINKPULSE_CONFIG_GAIN_8 = [f"x{i}040010X" for i in range(1, 9)]
 
 class SessionEEG:
     
-    # filename: str, example: "file.csv"
-    # training_pipeline: list, example: [(func1, time1), (func2, time2), ...] #TODO
+    BASE_THINKPULSE_CONFIG_GAIN_4 = [f"x{i}020010X" for i in range(1, 9)]
+    BASE_THINKPULSE_CONFIG_GAIN_6 = [f"x{i}030010X" for i in range(1, 9)]
+    BASE_THINKPULSE_CONFIG_GAIN_8 = [f"x{i}040010X" for i in range(1, 9)]
+    # x:start_command | i: channel_index(1-8) | 0: on | 3: gain6(2 for 4, 4 for 8) | 0: adc_channel_input_source | 0: remove from BIAS | 1: SRB2 | 0: disconnect SRB1
+
     # config: list of channel configuration, follow https://docs.openbci.com/Cyton/CytonSDK/#channel-setting-commands
-    # write_mode: str, can be "append" for extended sessions or "write" for single session files.
     # port: str, serial port, example: "COM3", "/dev/tty/USB0"
-    # duration: num, session duration in seconds
-    def __init__(self, config=BASE_THINKPULSE_CONFIG_GAIN_6, port="COM3"):
+    def __init__(self, config=BASE_THINKPULSE_CONFIG_GAIN_6, port="COM3", simulated=False):
         self.params = BrainFlowInputParams()
         self.params.serial_port = port
-        self.board = BoardShim(BoardIds.CYTON_BOARD.value, self.params)
+        self.board = BoardShim(BoardIds.CYTON_BOARD.value if not simulated else BoardIds.SYNTHETIC_BOARD.value, self.params)
         self.config = config
-        
+
     def basic_stream_start(self):
         # prepare session
         self.board.prepare_session()
@@ -46,15 +43,14 @@ class SessionEEG:
         # release session
         self.board.release_session()
 
-    def basic_stream(self, duration, filename=None, write_mode="w"):
+    def basic_stream(self, duration):
         self.basic_stream_start()
         time.sleep(duration)
         self.basic_stream_stop()
-        if filename is not None:
-            DataFilter.write_file(self.data, filename, write_mode)
-            print(f"Saved session data to {filename}\n")
-        else:
-            pprint(self.data)
+        
+    def export_data(self, filename, write_mode="w"):
+        DataFilter.write_file(self.data, filename, write_mode)
+        print(f"Saved session data to {filename}\n")
 
     def process_pipeline(self, pipeline : PipelineEEG , timeout=0):
         # start the stream
@@ -62,6 +58,8 @@ class SessionEEG:
         self.basic_stream_start()
         # process the pipeline
         status = pipeline.start(self.board, timeout)
+        # stop the stream
+        self.basic_stream_stop()
         # return pipeline status
         return status
 
