@@ -1,10 +1,8 @@
 import random as rd
 import time
-import numpy as np
-from pprint import pprint
 from brainflow.board_shim import BoardShim
 
-from action import ActionEEG
+from eeglib.action import ActionEEG
 
 
 

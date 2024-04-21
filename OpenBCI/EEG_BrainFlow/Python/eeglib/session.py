@@ -6,7 +6,7 @@ from pprint import pprint
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
 from brainflow.data_filter import DataFilter
 
-from pipeline import PipelineEEG
+from eeglib.pipeline import PipelineEEG
 
 
 
@@ -29,9 +29,10 @@ class SessionEEG:
     def basic_stream_start(self):
         # prepare session
         self.board.prepare_session()
-        # apply channel configuration
-        for conf in self.config:
-            self.board.config_board(conf)
+        # apply channel configuration, skip if simulated
+        if self.board.board_id != BoardIds.SYNTHETIC_BOARD.value:
+            for conf in self.config:
+                self.board.config_board(conf)
         # start stream
         self.board.start_stream()
     
