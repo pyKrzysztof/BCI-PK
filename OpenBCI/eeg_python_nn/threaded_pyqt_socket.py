@@ -2,7 +2,6 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore
 from PyQt5 import QtWidgets
 import numpy as np
-import time
 import queue
 import threading
 import argparse
@@ -22,10 +21,6 @@ stop_event = threading.Event()
 
 # Data-gathering thread function
 def gather_data(port, queue: queue.Queue):
-    # Deque to store data for plotting
-    channels = collections.deque(maxlen=750)
-    times = collections.deque(maxlen=750)
-    
     packet_count = 0
     socket = NumpySocket()
     try:
@@ -38,13 +33,10 @@ def gather_data(port, queue: queue.Queue):
                 continue
             
             # Add data to the queue for plotting\
-            for packet in packets:
-                channels.append(packet[:-1])
-                times.append(packet[-1])
-            queue.put((channels, times))
+            queue.put(packets)
             
             packet_count = packet_count + 1
-            print(f"N: {packet_count}, Received packets of shape: {packets.shape}")
+            # print(f"N: {packet_count}, Received packets of shape: {packets.shape}")
 
     except Exception as e:
         print("Error in data gathering:", e)
@@ -54,25 +46,36 @@ def gather_data(port, queue: queue.Queue):
 # Setup PyQtGraph
 app = QtWidgets.QApplication([])  # Initialize a Qt application
 win = pg.GraphicsLayoutWidget(show=True)  # Create a graphics layout widget
-win.setWindowTitle("Real-Time EEG Plot")
+win.setWindowTitle("EEG Data")
 
 # Create plots for 8 channels
 plots = [win.addPlot(row=i, col=0) for i in range(8)]
 curves = [plot.plot() for plot in plots]  # Create curves to update
 
+# Deques to store data for plotting
+channel_data = [collections.deque(maxlen=750), collections.deque(maxlen=750), collections.deque(maxlen=750), collections.deque(maxlen=750), collections.deque(maxlen=750), collections.deque(maxlen=750), collections.deque(maxlen=750), collections.deque(maxlen=750)]
+time_data = collections.deque(maxlen=750)
+marker_data = collections.deque(maxlen=750)
 
 # Function to update the plot
 def update_plot():
     try:
         # Get data from the queue
-        channels, times = data_queue.get(timeout=0.2)
-        
+        data = data_queue.get(timeout=0.2)
+
+        # Append the time and marker data (gathering socket must be run with '-markers' parameter)
+        time_data.extend(data[-1])
+        marker_data.extend(data[-2])
+
+        # Update the curves with new data
         for i in range(8):  # 8 channels
-            # Update the curve with new data
-            curve_data = [row[i] for row in channels]
-            curves[i].setData(x=times, y=curve_data)  # Set the data for the curve
+            channel_data[i].extend(data[i])
+            curve_data = channel_data[i]
+            curves[i].setData(x=time_data, y=curve_data)  # Set the data for the curve
+    
+    # If no data, just continue
     except queue.Empty:
-        pass  # If no data, just continue
+        pass  
 
 # Set up the data-gathering thread
 gather_thread = threading.Thread(target=gather_data, args=(args.port, data_queue))
