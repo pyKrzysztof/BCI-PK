@@ -31,6 +31,7 @@ stop_event = threading.Event()
 
 # Function to read and create a pipeline function from a file.
 def load_pipeline(path):
+    
     return lambda *_: None
 
 # Function to send data from the queue in a separate thread
@@ -108,9 +109,7 @@ def gather_data(args):
     send_channels = eeg_channels
     if args.markers:
         send_channels.append(marker_channel)
-    print(send_channels)
     send_channels.append(timestamp_channel)
-    print(send_channels)
     
     # Main loop
     while not stop_event.is_set():
@@ -127,7 +126,7 @@ def gather_data(args):
         if buffer_count == previous_buffer_count:
             continue
 
-        process_pipeline(board, now, start_time)
+        process_pipeline(board, now - start_time)
         previous_buffer_count = buffer_count
 
         if datetime.datetime.now() > end_time:
