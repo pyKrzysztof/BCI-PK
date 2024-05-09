@@ -11,18 +11,11 @@ from typing import Callable, List
 import json
 
 
-
 # Function being executed with each action in a new thread. 
 # A marker (action) is inserted as this function starts and when it returns (-action).
 def sample_action_function(action):
     print("LEFT")
     time.sleep(random.uniform(4, 6))
-
-# Load pipeline parameters from JSON
-def load_pipeline_parameters(json_filename: str):
-    with open(json_filename, "r") as json_file:
-        data = json.load(json_file)
-        return data
 
 
 # Represents a timetable entry with a random time delta and a specific action
@@ -123,16 +116,21 @@ class PipelineProcessor:
         self.marker_insert_function = func
 
 
+# Load pipeline parameters from JSON
+def load_pipeline_parameters(json_filename: str):
+    with open(json_filename, "r") as json_file:
+        data = json.load(json_file)
+        return data
+
 
 # Constants and session setup
 session_start_time = datetime.datetime.now().strftime("%d-%m-%Y-%H%M%S")
 ELECTRODES = range(1, 9)
 BOARD = BoardIds.CYTON_BOARD
-SAMPLING_RATE = BoardShim.get_sampling_rate(BOARD.value)
-
 PACKET_SIZE = 25
 FILTER_NOTCH_FREQ = 50
 FILTER_FACTOR = 30
+SAMPLING_RATE = BoardShim.get_sampling_rate(BOARD.value)
 
 # Configuration presets
 BASE_THINKPULSE_CONFIG_GAIN_8 = [f"x{i}040010X" for i in ELECTRODES]
@@ -224,12 +222,11 @@ def gather_data(args):
 
     # Set up board and config
     board.prepare_session()
-    if not args.simulated:
-        for conf in BASE_THINKPULSE_CONFIG_GAIN_8:
-            print(board.config_board(conf))
-            time.sleep(0.5)
-        # config = "".join(BASE_THINKPULSE_CONFIG_GAIN_2)
-        # board.config_board(config)
+    for conf in BASE_THINKPULSE_CONFIG_GAIN_8:
+        board.config_board(conf)
+        time.sleep(1)
+    # config = "".join(BASE_THINKPULSE_CONFIG_GAIN_2)
+    # board.config_board(config)
 
     # Add the streamer output
     if args.streamer:
@@ -289,9 +286,7 @@ def start_server(parsed_args):
             server_socket.bind((parsed_args.ip, port))
             connected = True
         except:
-            if not parsed_args.force_port:
-                port = port - 1
-            pass
+            port = port - 1
         if connected:
             break
 
@@ -320,7 +315,6 @@ def main():
     parser.add_argument("-simulated", action="store_true", help="Simulates a board if no physical connection is present.")
     parser.add_argument("-noserver", action="store_true", help="Doesn't run the socket server, only makes sense if streamer is enabled.")
     parser.add_argument("-markers", action="store_true", help="Decides if the marker channel will be passed as second to last row of data over the socket.")
-    parser.add_argument("-force_port", action="store_true", required=False, default=False)
     args = parser.parse_args()
     print("Running a session with:", args)
     
