@@ -11,19 +11,34 @@ from typing import Callable, List
 import json
 
 
-
 # Function being executed with each action in a new thread. 
 # A marker (action) is inserted as this function starts and when it returns (-action).
 def sample_action_function(action):
-    print("LEFT")
+    print(action)
     time.sleep(random.uniform(4, 6))
+
+
+# Constants and session setup
+session_start_time = datetime.datetime.now().strftime("%d-%m-%Y-%H%M%S")
+ELECTRODES = 8
+BOARD = BoardIds.CYTON_BOARD
+SAMPLING_RATE = BoardShim.get_sampling_rate(BOARD.value)
+PACKET_SIZE = 50
+FILTER_NOTCH_FREQ = 50
+FILTER_FACTOR = 30
+BASE_THINKPULSE_CONFIG_GAIN_8 = [f"x{i+1}040010X" for i in range(ELECTRODES)]
+
+# Create a queue to hold data between threads
+data_queue = queue.Queue()
+
+# Create server stop event
+stop_event = threading.Event()
 
 # Load pipeline parameters from JSON
 def load_pipeline_parameters(json_filename: str):
     with open(json_filename, "r") as json_file:
         data = json.load(json_file)
         return data
-
 
 # Represents a timetable entry with a random time delta and a specific action
 class TimetableEntry:
@@ -89,7 +104,6 @@ class PipelineProcessor:
                 if time_since_last_action >= time_to_next_action:
                     self.start_next_action()
             else:
-                print("Pipeline should be done by now.")
                 return 1 
 
     def start_next_action(self):
@@ -123,29 +137,8 @@ class PipelineProcessor:
         self.marker_insert_function = func
 
 
-
-# Constants and session setup
-session_start_time = datetime.datetime.now().strftime("%d-%m-%Y-%H%M%S")
-ELECTRODES = range(1, 9)
-BOARD = BoardIds.CYTON_BOARD
-SAMPLING_RATE = BoardShim.get_sampling_rate(BOARD.value)
-
-PACKET_SIZE = 25
-FILTER_NOTCH_FREQ = 50
-FILTER_FACTOR = 30
-
-# Configuration presets
-BASE_THINKPULSE_CONFIG_GAIN_8 = [f"x{i}040010X" for i in ELECTRODES]
-
-# Create a queue to hold data between threads
-data_queue = queue.Queue()
-
-# Create server stop event
-stop_event = threading.Event()
-
 # Function to send data from the queue in a separate thread
-def server_thread(args, connection, server_stop_event):
-    
+def server_thread(args, connection: NumpySocket, server_stop_event):
     # Create filter parameters
     if args.filter:
         b, a = signal.iirnotch(FILTER_NOTCH_FREQ, FILTER_FACTOR, fs=SAMPLING_RATE)
@@ -158,7 +151,7 @@ def server_thread(args, connection, server_stop_event):
                 data, epoch_start = data_queue.get(timeout=0.5)  # Adjust timeout as needed
                 
                 if args.filter:
-                    for i in range(8):
+                    for i in range(ELECTRODES):
                         data[i] = signal.lfilter(b, a, data[i])
 
                 data[-1] = [timestamp - epoch_start for timestamp in data[-1]]
@@ -178,7 +171,15 @@ def server_thread(args, connection, server_stop_event):
             server_stop_event.set()
             print("Session won't continue as there is no active backup streamer. Consider adding '-streamer' as a parameter.")
     finally:
-        connection.close()
+        # 2 Disables a Socket for both sending and receiving. This field is constant.
+        # 1 Disables a Socket for sending. This field is constant.
+        # 0 Disables a Socket for receiving. This field is constant.
+        try:
+            connection.shutdown(2)
+        except:
+            pass
+        finally:
+            connection.close()
 
 # Function to gather data in the main thread
 def gather_data(args):
@@ -192,12 +193,13 @@ def gather_data(args):
     package_num_channel = BoardShim.get_package_num_channel(board.board_id)
     eeg_channels = BoardShim.get_eeg_channels(board.board_id)
     marker_channel = BoardShim.get_marker_channel(board.board_id)
+    gyro_channels = BoardShim.get_gyro_channels(board.board_id)
     timestamp_channel = BoardShim.get_timestamp_channel(board.board_id)
     
     # Select channels to be sent over TCP/IP
     send_channels = eeg_channels
-    if args.markers:
-        send_channels.append(marker_channel)
+    send_channels.extend(gyro_channels)
+    send_channels.append(marker_channel)
     send_channels.append(timestamp_channel)
     
     # Prepare pipeline (if provided)
@@ -242,7 +244,7 @@ def gather_data(args):
     end_time = start_time + datetime.timedelta(seconds=args.time)
     previous_buffer_count = 0
     pipeline_end_flag = False
-    
+    packet_n = 0
     # Main loop
     while not stop_event.is_set():
         now = datetime.datetime.now()
@@ -250,9 +252,14 @@ def gather_data(args):
 
         # Get the latest data from the board
         if buffer_count >= PACKET_SIZE:
+            packet_n = packet_n + buffer_count
             packets = board.get_board_data()
             data = packets[send_channels]
             data_queue.put((data, epoch_start))
+            # End the session one packet_size after pipeline ended (to not miss the last marker)
+            if pipeline_end_flag:
+                print("Finished the pipeline. ", packet_n)
+                break
 
         # Ignore rest of the loop if no new data arrived.
         if buffer_count == previous_buffer_count:
@@ -261,11 +268,6 @@ def gather_data(args):
         previous_buffer_count = buffer_count
         
         if args.pipeline:
-            # End the session one packet after pipeline ended (to not miss the last marker)
-            if pipeline_end_flag:
-                print("Finished the pipeline.")
-                break
-
             # Process the pipeline (if present)
             pipeline_end_flag = processor.process_pipeline(now)
 

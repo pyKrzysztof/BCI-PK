@@ -87,6 +87,8 @@ def update_plot(data_queue: queue.Queue, curves, fft_curves, time_data, channel_
                 fft_result = np.abs(np.fft.fft(windowed_signal))[:fft_data_size//2]
                 fft_curves[i].setData(x=fft_freq_axis, y=fft_result)
 
+            
+            
     except queue.Empty:
         pass
 
