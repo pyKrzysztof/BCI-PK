@@ -10,7 +10,7 @@ import random
 from typing import Callable, List
 import json
 import importlib
-
+import sys
 
 # Function being executed with each action in a new thread. 
 # A marker (action) is inserted as this function starts and when it returns (-action).
@@ -165,7 +165,7 @@ def server_thread(args, connection: NumpySocket, server_stop_event):
     # Handle exceptions due to a closed socket.
     except Exception as e:
         print("Server crashed.")
-        if args.streamer:
+        if not args.nostreamer:
             print("Session will continue as there's an active backup streamer.")
         else:
             server_stop_event.set()
@@ -203,50 +203,56 @@ def gather_data(args):
     send_channels.append(timestamp_channel)
     
     # Prepare pipeline (if provided)
-    if args.pipeline:
-        # Load pipeline parameters from a JSON configuration file
-        pipeline_parameters = load_pipeline_parameters(args.pipeline)
+    try:
+        if args.pipeline:
+            # Load pipeline parameters from a JSON configuration file
+            pipeline_parameters = load_pipeline_parameters(args.pipeline)
 
-        # Extract parameters from JSON data
-        actions = pipeline_parameters["actions"]
-        action_identifiers = {name: idx+1 for idx, name in enumerate(actions)}  # Unique identifiers for each action
+            # Extract parameters from JSON data
+            actions = pipeline_parameters["actions"]
+            action_identifiers = {name: idx+1 for idx, name in enumerate(actions)}  # Unique identifiers for each action
 
-        min_time = pipeline_parameters["time_between_actions_min"]
-        max_time = pipeline_parameters["time_between_actions_max"]
-        n_samples = pipeline_parameters["n_samples"]
+            min_time = pipeline_parameters["time_between_actions_min"]
+            max_time = pipeline_parameters["time_between_actions_max"]
+            n_samples = pipeline_parameters["n_samples"]
 
-        # Generate timetable
-        generator = TimetableGenerator(actions, min_time, max_time, n_samples)
-        timetable = generator.generate_timetable()
+            # Generate timetable
+            generator = TimetableGenerator(actions, min_time, max_time, n_samples)
+            timetable = generator.generate_timetable()
 
-        # Create the pipeline processor with action identifiers
-        processor = PipelineProcessor(timetable, action_identifiers)
-        processor.set_marker_function(board.insert_marker)
+            # Create the pipeline processor with action identifiers
+            processor = PipelineProcessor(timetable, action_identifiers)
+            processor.set_marker_function(board.insert_marker)
 
-        # Prepare the pipeline callbacks
-        init_handle_source = pipeline_parameters["call_on_enter"]
-        action_handle_source = pipeline_parameters["call_on_action"]
-        init_module, init_func = init_handle_source.rsplit('.', 1)
-        action_module, action_func = action_handle_source.rsplit('.', 1)
-        assert init_module == action_module
-        assert init_func != action_func
-        module = importlib.import_module(init_module)
-        init_func_handle = getattr(module, init_func)
-        action_func_handle = getattr(module, action_func)
+            # Prepare the pipeline callbacks
+            init_module, init_func = pipeline_parameters["call_on_enter"].rsplit(".", 1)
+            action_module, action_func = pipeline_parameters["call_on_action"].rsplit(".", 1)
+            close_module, close_func = pipeline_parameters["call_on_exit"].rsplit(".", 1)
+            assert init_module == action_module == close_module
+            assert init_func != action_func
+            module = importlib.import_module(init_module)
+            init_func_handle = getattr(module, init_func)
+            action_func_handle = getattr(module, action_func)
+            close_func_handle = getattr(module, close_func)
 
-        init_params = init_func_handle()
-        processor.action_callback_func = lambda action: action_func_handle(init_params, action)
+            init_params = init_func_handle()
+            processor.action_callback_func = lambda action: action_func_handle(init_params, action)
+            processor.on_exit_callback = lambda: close_func_handle(init_params)
 
+    except Exception as e:
+        print(e)
+        print("Pipeline error. Exitting.")
+        sys.exit()
 
     # Set up board and config
     board.prepare_session()
-    if not args.simulated and not args.noconfig:
+    if not args.simulated and args.config:
         for conf in BASE_THINKPULSE_CONFIG_GAIN_8:
             print(board.config_board(conf))
             time.sleep(0.25)
 
     # Add the streamer output
-    if args.streamer:
+    if not args.nostreamer:
         pipeline_name = args.pipeline[:-5] if args.pipeline != "" else "raw_data"
         name = f"file://{pipeline_name}_{session_start_time}.csv:w"
         board.add_streamer(name, preset=BrainFlowPresets.DEFAULT_PRESET)
@@ -273,6 +279,7 @@ def gather_data(args):
             # End the session one packet_size after pipeline ended (to not miss the last marker)
             if pipeline_end_flag:
                 print("Finished the pipeline. ", packet_n)
+                processor.on_exit_callback()
                 break
 
         # Ignore rest of the loop if no new data arrived.
@@ -334,15 +341,15 @@ def main():
     parser.add_argument("-streamer", action="store_true", help="Streams board data into a .csv file with current date and time as the filename.")
     parser.add_argument("-filter", action="store_true", help="Enables a notch filter at 50Hz")
     parser.add_argument("-simulated", action="store_true", help="Simulates a board if no physical connection is present.")
-    parser.add_argument("-noserver", action="store_true", help="Doesn't run the socket server, only makes sense if streamer is enabled.")
+    parser.add_argument("-server", action="store_true", help="Runs the socket server.")
     parser.add_argument("-markers", action="store_true", help="Decides if the marker channel will be passed as second to last row of data over the socket.")
-    parser.add_argument("-noconfig", action="store_true", help="Skips sending config.")
+    parser.add_argument("-config", action="store_true", help="Send active electrode config.")
     parser.add_argument("-force_port", action="store_true", required=False, default=False)
     args = parser.parse_args()
     print("Running a session with:", args)
     
     # Set up the server socket and start the server thread
-    if not args.noserver:
+    if args.server:
         server_socket, server_thread_instance = start_server(args)
 
     # Run the data-gathering function in the main thread
@@ -351,7 +358,7 @@ def main():
     except Exception as e:
         raise e
     finally:
-        if not args.noserver:
+        if args.server:
             stop_event.set()
             server_socket.close()  # Close the server when done
             server_thread_instance.join()  # Wait for the server thread to complete
