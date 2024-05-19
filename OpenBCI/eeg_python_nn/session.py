@@ -9,13 +9,14 @@ import scipy.signal as signal
 import random
 from typing import Callable, List
 import json
+import importlib
 
 
 # Function being executed with each action in a new thread. 
 # A marker (action) is inserted as this function starts and when it returns (-action).
-def sample_action_function(action):
-    print(action)
-    time.sleep(random.uniform(4, 6))
+# This feature is now used with pipeline callbacks, see 'simple_pipeline.json' and 'comm_over_serial.py'
+# def sample_action_function(action):
+    # time.sleep(random.uniform(4, 6))
 
 
 # Constants and session setup
@@ -123,10 +124,9 @@ class PipelineProcessor:
             self.last_action_end_time = datetime.datetime.now()
         
         # Create the action executor and start it
-        
         action_executor = ActionExecutor(
             entry.action,
-            lambda: sample_action_function(entry.action),  # Simulate the action
+            lambda: self.action_callback_func(entry.action),
             on_action_complete
         )
         action_executor.start()  # Start non-blocking action
@@ -193,12 +193,12 @@ def gather_data(args):
     package_num_channel = BoardShim.get_package_num_channel(board.board_id)
     eeg_channels = BoardShim.get_eeg_channels(board.board_id)
     marker_channel = BoardShim.get_marker_channel(board.board_id)
-    gyro_channels = BoardShim.get_gyro_channels(board.board_id)
+    # gyro_channels = BoardShim.get_gyro_channels(board.board_id)
     timestamp_channel = BoardShim.get_timestamp_channel(board.board_id)
     
     # Select channels to be sent over TCP/IP
     send_channels = eeg_channels
-    send_channels.extend(gyro_channels)
+    # send_channels.extend(gyro_channels)
     send_channels.append(marker_channel)
     send_channels.append(timestamp_channel)
     
@@ -223,20 +223,34 @@ def gather_data(args):
         processor = PipelineProcessor(timetable, action_identifiers)
         processor.set_marker_function(board.insert_marker)
 
+        # Prepare the pipeline callbacks
+        init_handle_source = pipeline_parameters["call_on_enter"]
+        action_handle_source = pipeline_parameters["call_on_action"]
+        init_module, init_func = init_handle_source.rsplit('.', 1)
+        action_module, action_func = action_handle_source.rsplit('.', 1)
+        assert init_module == action_module
+        assert init_func != action_func
+        module = importlib.import_module(init_module)
+        init_func_handle = getattr(module, init_func)
+        action_func_handle = getattr(module, action_func)
+
+        init_params = init_func_handle()
+        processor.action_callback_func = lambda action: action_func_handle(init_params, action)
+
 
     # Set up board and config
     board.prepare_session()
-    if not args.simulated:
+    if not args.simulated and not args.noconfig:
         for conf in BASE_THINKPULSE_CONFIG_GAIN_8:
             print(board.config_board(conf))
-            time.sleep(0.5)
-        # config = "".join(BASE_THINKPULSE_CONFIG_GAIN_2)
-        # board.config_board(config)
+            time.sleep(0.25)
 
     # Add the streamer output
     if args.streamer:
-        board.add_streamer(f"file://{session_start_time}_default.csv:w", preset=BrainFlowPresets.DEFAULT_PRESET)
-    
+        pipeline_name = args.pipeline[:-5] if args.pipeline != "" else "raw_data"
+        name = f"file://{pipeline_name}_{session_start_time}.csv:w"
+        board.add_streamer(name, preset=BrainFlowPresets.DEFAULT_PRESET)
+
     # Start the stream
     board.start_stream()
     epoch_start = time.time()
@@ -314,7 +328,7 @@ def main():
     parser = argparse.ArgumentParser("threaded_gathering_socket")
     parser.add_argument("--ip", type=str, default="localhost", required=False)
     parser.add_argument("--port", type=int, default=9999, required=False)
-    parser.add_argument("--device_port", type=str, default="/dev/ttyS3", required=False)
+    parser.add_argument("--device_port", type=str, default="/dev/ttyUSB0", required=False)
     parser.add_argument("--time", type=int, default=0, required=False, help="Time of the simulation, will run indefinitely if not provided or as long as it needs when --pipeline is passed.")
     parser.add_argument("--pipeline", type=str, default="", required=False, help="Pass a .json file with pipeline configuration to process the pipeline, overwrites --time parameter.")
     parser.add_argument("-streamer", action="store_true", help="Streams board data into a .csv file with current date and time as the filename.")
@@ -322,6 +336,7 @@ def main():
     parser.add_argument("-simulated", action="store_true", help="Simulates a board if no physical connection is present.")
     parser.add_argument("-noserver", action="store_true", help="Doesn't run the socket server, only makes sense if streamer is enabled.")
     parser.add_argument("-markers", action="store_true", help="Decides if the marker channel will be passed as second to last row of data over the socket.")
+    parser.add_argument("-noconfig", action="store_true", help="Skips sending config.")
     parser.add_argument("-force_port", action="store_true", required=False, default=False)
     args = parser.parse_args()
     print("Running a session with:", args)
