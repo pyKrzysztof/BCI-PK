@@ -338,7 +338,7 @@ def main():
     parser.add_argument("--device_port", type=str, default="/dev/ttyUSB0", required=False)
     parser.add_argument("--time", type=int, default=0, required=False, help="Time of the simulation, will run indefinitely if not provided or as long as it needs when --pipeline is passed.")
     parser.add_argument("--pipeline", type=str, default="", required=False, help="Pass a .json file with pipeline configuration to process the pipeline, overwrites --time parameter.")
-    parser.add_argument("-streamer", action="store_true", help="Streams board data into a .csv file with current date and time as the filename.")
+    parser.add_argument("-nostreamer", action="store_true", help="Prevents the streaming of board data into a .csv file with current date and time as the filename.")
     parser.add_argument("-filter", action="store_true", help="Enables a notch filter at 50Hz")
     parser.add_argument("-simulated", action="store_true", help="Simulates a board if no physical connection is present.")
     parser.add_argument("-server", action="store_true", help="Runs the socket server.")

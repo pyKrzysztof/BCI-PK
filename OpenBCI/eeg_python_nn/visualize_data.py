@@ -10,7 +10,7 @@ from misc.my_utils import calculate_time, get_fft_size
 
 
 # raw data
-def process_1(data, channel, sampling_rate):
+def raw(data, channel, sampling_rate):
     return data
 
 # detrend data
@@ -40,30 +40,31 @@ def process_4(data, channel, sampling_rate):
     return data
 
 
-processes = [process_1, process_2, process_3, process_4]
-
+processes = [raw, process_2, process_3, process_4]
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=str, default="/dev/ttyUSB0", required=False, help="Device port.")
-    parser.add_argument("--from-file", type=str, default="", required=False, help="Runs .csv data playback instead of a live board connection.")
+    parser.add_argument("--file", type=str, default="", required=False, help="Runs .csv data playback instead of a live board connection.")
     parser.add_argument("--app-id", type=int, default=0, required=False, help="Choose application to use, 0 for default visualization app on all channels, 1 for detailed comparison of data between processes (single channel)")
     parser.add_argument("-simulated", action="store_true", required=False, help="If --from-file source was NOT specified this will simulate a live board data.")
     parser.add_argument("--packet-size", type=int, default=64, required=False, help="Amount of data packets to be analyzed at a time by the update() method and processes.")
     parser.add_argument("--update-ms", type=int, default=100, required=False, help="Interval of running the internal update() method.")
-    parser.add_argument("--display-time", type=int, default=100, required=False, help="Time window of the recent data to be displayed, independantly of fft calculation.")
+    parser.add_argument("--display-time", type=int, default=2, required=False, help="Time window of the recent data to be displayed, independantly of fft calculation.")
     parser.add_argument("-debug-time", action="store_true", required=False)
     parser.add_argument("--window", type=int, default=0, required=False, help="Window method for FFT calculation, 0 = BLACKMAN_HARRIS, 1 = HAMMING")
     parser.add_argument("--fft-res", type=float, default=2.0, required=False, help="FFT resolution [Hz]")
+    parser.add_argument("--ylimit", type=int, default=0, required=False, help="Amplitude limit of each signal to be displayed on the graph.")
     args = parser.parse_args()
     
     fft_size = get_fft_size(args.fft_res, args.packet_size, verbose=True)
 
-    kwargs = {"board_shim": None, "from_file": args.from_file, "points_to_analyze": args.packet_size, 
+    kwargs = {"board_shim": None, "from_file": args.file, "points_to_analyze": args.packet_size, 
               "update_speed_ms": args.update_ms, "display_s": args.display_time, "fft_size": fft_size,
-              "processes": processes}
+              "y_limit": args.ylimit, "processes": processes}
 
     BoardShim.enable_dev_board_logger()
+    DataFilter.disable_data_logger()
     logging.basicConfig(level=logging.DEBUG)
     
     params = BrainFlowInputParams()
@@ -72,16 +73,16 @@ def main():
     app_handle = AppPresenter if args.app_id == 1 else AppAnalyzer
 
     if args.window == 1:
-        AppBase.window_method = WindowOperations.HAMMING
+        AppBase.window_method = WindowOperations.HAMMING.value
     else: 
-        AppBase.window_method = WindowOperations.BLACKMAN_HARRIS
+        AppBase.window_method = WindowOperations.BLACKMAN_HARRIS.value
 
     if args.debug_time:
         app_handle.update_file = calculate_time(app_handle.update_file)
-        app_handle.update_live = calculate_time(app_handle.update_live)
+        app_handle.update = calculate_time(app_handle.update)
 
     # run from file
-    if args.from_file != "":
+    if args.file != "":
         return app_handle(**kwargs)
     
     # run from live data
