@@ -63,7 +63,7 @@ def process_data(data_queue: queue.Queue, curves, fft_curves, time_data, channel
         marker_data = data[-2]
         
         # Seperate the gyro data
-        gyro_data = data[-5:-2]
+        # gyro_data = data[-5:-2]
         
         # Holder for the fft data
         fft_data = []
@@ -90,7 +90,8 @@ def process_data(data_queue: queue.Queue, curves, fft_curves, time_data, channel
 
         # Try writing to a file - will fail if the FileIO is not open.
         try:
-            for samples in zip(*data[:ELECTRODES], *gyro_data, marker_data):
+            for samples in zip(*data[:ELECTRODES], marker_data):
+            # for samples in zip(*data[:ELECTRODES], *gyro_data, marker_data):
                 row = [samples[-1],]
                 row.extend(samples[:-1])
                 csv_writer.writerow(row)

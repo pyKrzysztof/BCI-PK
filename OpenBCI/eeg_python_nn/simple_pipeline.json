@@ -1,6 +1,8 @@
 {
-    "actions": ["UP", "DOWN", "LEFT", "RIGHT"],
+    "actions": ["L", "R"],
     "time_between_actions_min": 2,
     "time_between_actions_max": 4,
-    "n_samples": 2
+    "n_samples": 10,
+    "call_on_enter": "comm_over_serial.init_serial",
+    "call_on_action": "comm_over_serial.action_callback"
 }

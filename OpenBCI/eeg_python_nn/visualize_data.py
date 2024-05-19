@@ -5,8 +5,8 @@ import pyqtgraph as pg
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
 from brainflow.data_filter import DataFilter, FilterTypes, WindowOperations, DetrendOperations
 
-from data_visualization import AppAnalyzer, AppBase, AppPresenter
-from my_utils import calculate_time, get_fft_size
+from eegplotterlib import AppAnalyzer, AppBase, AppPresenter
+from misc.my_utils import calculate_time, get_fft_size
 
 
 # raw data
