@@ -207,9 +207,11 @@ class AppAnalyzer(AppBase):
         channel = self.eeg_channels[0]
         while data is not None:
             data_copies = [np.copy(data, order="C") for _ in range(len(self.processes))]
+
             # process the data
             for i, process in enumerate(self.processes):
-                data_copies[i] = process(data_copies[i], channel, self.sampling_rate)
+                for count, channel in enumerate(self.eeg_channels):
+                    data_copies[i] = process(data_copies[i], channel, self.sampling_rate)
 
                 # join packet data to the full data for each process       
                 self.full_data[i] = np.array(np.concatenate((self.full_data[i], data_copies[i]), axis=1), order="C")
