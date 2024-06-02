@@ -21,6 +21,16 @@ def process_1(data):
                                 FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
     return data
 
+def process_2(data):
+    DataFilter.detrend(data, DetrendOperations.CONSTANT.value)
+    DataFilter.perform_bandpass(data, SAMPLING_RATE, 4.0, 45.0, 2,
+                                FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
+    DataFilter.perform_bandstop(data, SAMPLING_RATE, 48.0, 52.0, 2,
+                                FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
+    DataFilter.perform_bandstop(data, SAMPLING_RATE, 58.0, 62.0, 2,
+                                FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
+    return data
+
 
 # wrapper function
 def process_channel_data(func, channels):
@@ -84,4 +94,4 @@ def process_from_file(filepath, packet_size=32, process_list=[raw, ]):
 
 
 if __name__ == "__main__":
-    process_from_file("dane/dane_50-50lewo_prawo.csv", packet_size=64, process_list=[process_1,])
+    process_from_file("dane/dane_50-50lewo_prawo.csv", packet_size=32, process_list=[process_1, process_2])

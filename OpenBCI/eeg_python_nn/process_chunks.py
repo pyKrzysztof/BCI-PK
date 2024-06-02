@@ -55,11 +55,11 @@ def process_chunk(file_path, N, X, skip_rows=250) -> tuple[pd.DataFrame, pd.Data
 
 
 # Define N and X
-N = 25  # packet size
+N = 32  # packet size
 X = 128   # Number of rows to take for fft 
 
 # Directory containing the chunk files
-chunk_dir = 'dane/lp_50_50_processed/'
+chunk_dir = 'dane/chunks_processed_linear_detrend/'
 output_dir = os.path.join(chunk_dir, 'training/')
 
 # Create the output directory if it doesn't exist

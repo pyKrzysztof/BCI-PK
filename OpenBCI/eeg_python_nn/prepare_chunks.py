@@ -3,8 +3,8 @@ import os
 
 
 # Load the CSV file
-file_path = 'dane/processed_lp_50_50.csv'
-out_path = 'dane/lp_50_50_processed/'
+file_path = 'dane/processed_linear_detrend.csv'
+out_path = 'dane/chunks_processed_linear_detrend/'
 df = pd.read_csv(file_path, sep="\t")
 print("Loaded data.")
 
