@@ -9,9 +9,6 @@ def process_chunk(file_path, N, X, skip_rows=250) -> tuple[pd.DataFrame, pd.Data
     # Load the CSV file
     df = pd.read_csv(file_path, header=None)
 
-    # Skip the first second of data
-    # df = df.iloc[:]
-
     # List to store the results
     result = []
 
@@ -59,7 +56,7 @@ N = 32  # packet size
 X = 128   # Number of rows to take for fft 
 
 # Directory containing the chunk files
-chunk_dir = 'dane/chunks_processed_linear_detrend/'
+chunk_dir = 'dane/chunks_processed_constant_detrend/zero_chunks/'
 output_dir = os.path.join(chunk_dir, 'training/')
 
 # Create the output directory if it doesn't exist

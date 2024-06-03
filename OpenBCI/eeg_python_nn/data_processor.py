@@ -93,5 +93,6 @@ def process_from_file(filepath, packet_size=32, process_list=[raw, ]):
 
 
 
+
 if __name__ == "__main__":
     process_from_file("dane/dane_50-50lewo_prawo.csv", packet_size=32, process_list=[process_1, process_2])
