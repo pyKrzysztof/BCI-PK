@@ -4,7 +4,7 @@ import numpy as np
 import pickle
 
 
-training_data_dir = "data/zero_data/"
+training_data_dir = "data/processed_session_data/chunks_processed_constant_detrend"
 training_data = []
 
 # load training data
@@ -25,13 +25,13 @@ for filename in os.listdir(training_data_dir):
     timedata = timedata[:, :8]
 
     # remove frequency scale
-    fftdata = fftdata[:-1, :]
+    fftdata = fftdata[1:, :]
 
     # get label
     print(filename)
     label = 0 if idx1[0] == "L" else 1
 
-    training_data.append((timedata, fftdata, -1.0))
+    training_data.append((timedata, fftdata, label))
 
 
 new_filename = training_data_dir[:-1] + ".pickle"
