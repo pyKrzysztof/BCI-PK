@@ -56,7 +56,7 @@ N = 32  # packet size
 X = 128   # Number of rows to take for fft 
 
 # Directory containing the chunk files
-chunk_dir = 'data/processed_session_data/chunks_processed_constant_detrend/'
+chunk_dir = 'data/chunks_processed/2/'
 output_dir = os.path.join(chunk_dir, 'training/')
 
 # Create the output directory if it doesn't exist

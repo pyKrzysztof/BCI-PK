@@ -4,7 +4,7 @@ import numpy as np
 import pickle
 
 
-training_data_dir = "data/processed_session_data/chunks_processed_constant_detrend/training/"
+training_data_dir = "data/chunks_processed/1/training"
 training_data = []
 
 # load training data

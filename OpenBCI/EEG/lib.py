@@ -1,5 +1,7 @@
 import os
 import time
+import pickle
+import random as rd
 import pandas as pd
 import numpy as np
 from collections import deque
@@ -50,41 +52,40 @@ class DataHandler:
 
 # Can have only one live source
 class DataProcessor:
-    def __init__(self, data_sources, packet_size, process_function, process_size, live_output_file=None, timeout=10, sep=',', save_processed=True):
-        self.data_sources = data_sources
+    def __init__(self, data_source, packet_size, process_function, process_size, output_file=None, timeout=10, sep=',', save_processed=True):
+        self.data_source = data_source
         self.packet_size = packet_size
         self.process_function = process_function
         self.process_size = process_size
-        self.live_output_file = live_output_file
         self.timeout = timeout
         self.packet_buffer = deque(maxlen=self.process_size // self.packet_size)
         self.sep_file = sep
         self.save_processed = save_processed
+        self.output_file = output_file
 
     # @calculate_time
     def process_data_sources(self):
-        if isinstance(self.data_sources, list):
-            self._process_file_sources()
+        if isinstance(self.data_source, str):
+            self._process_file_source()
         else:
             self._process_live_source()
 
-    def _process_file_sources(self):
-        for data_source in self.data_sources:
-            handler = DataHandler(data_source, self.packet_size, False, sep=self.sep_file)
-            processed_data = []
-            while True:
-                data_packet = handler.get_data_packet()
-                if data_packet.size == 0:
-                    break
-                self.packet_buffer.append(data_packet)
-                combined_packets = np.vstack(self.packet_buffer)
-                processed_packet = self.process_function(combined_packets, len(self.packet_buffer) * self.packet_size >= self.process_size)
-                processed_data.append(processed_packet)
-            print("Saving..")
-            self._save_processed_data(handler, processed_data)
+    def _process_file_source(self):
+        handler = DataHandler(self.data_source, self.packet_size, False, sep=self.sep_file)
+        processed_data = []
+        while True:
+            data_packet = handler.get_data_packet()
+            if data_packet.size == 0:
+                break
+            self.packet_buffer.append(data_packet)
+            combined_packets = np.vstack(self.packet_buffer)
+            processed_packet = self.process_function(combined_packets, len(self.packet_buffer) * self.packet_size >= self.process_size)
+            processed_data.append(processed_packet)
+        print("Saving..")
+        self._save_processed_data(handler, processed_data)
 
     def _process_live_source(self):
-        handler = DataHandler(self.data_sources, self.packet_size, True)
+        handler = DataHandler(self.data_source, self.packet_size, True)
         processed_data = []
         start_time = time.time()
         while True:
@@ -105,14 +106,86 @@ class DataProcessor:
 
     def _save_processed_data(self, handler, processed_data):
         if handler.is_live:
-            output_file = self.live_output_file
+            output_file = self.output_file
         else:
-            output_file = handler.filepath.replace('.csv', '_processed.csv')
+            if self.output_file == None:
+                output_file = handler.filepath.replace('.csv', '_processed.csv')
+            else:
+                output_file = self.output_file
         if processed_data:
             processed_data_array = np.vstack(processed_data[:-1])
             df = pd.DataFrame(processed_data_array)
-            print(output_file)
+            # print(output_file)
             df.to_csv(output_file, index=False, header=False, sep=self.sep_file, float_format='%.6f')
+
+
+def prepare_chunk_data(filename, output_dir, start_identifiers=[], sep='\t'):
+    # Define chunk end identifiers
+    end_identifiers = [-x for x in start_identifiers]
+
+    # Read the CSV file
+    df = pd.read_csv(filename, sep=sep)
+
+    # Variables to keep track of the current chunk and counters for each identifier
+    current_chunk = []
+    counters = {start: 0 for start in start_identifiers}
+
+    # Iterate through the DataFrame
+    for index, row in df.iterrows():
+        last_col_value = row.iloc[-1]
+
+        if last_col_value in start_identifiers:
+            # Start a new chunk
+            if current_chunk:
+                current_chunk = []  # Reset the current chunk if it was not empty
+            current_chunk = [row]
+        elif last_col_value in end_identifiers and current_chunk:
+            start_identifier = abs(last_col_value)
+            if current_chunk[0].iloc[-1] == start_identifier:
+                # End the chunk if the end identifier matches the start identifier
+                current_chunk.append(row)
+                # Save the chunk to a file
+                identifier = start_identifiers.index(start_identifier) + 1
+                chunk_df = pd.DataFrame(current_chunk)
+                filename_prefix = f"{int(start_identifier)}_{counters[start_identifier]}"
+                chunk_df.to_csv(os.path.join(output_dir, f'{filename_prefix}.csv'), header=False, index=False, sep=sep)
+                print(f"{filename_prefix} processed.")
+                counters[start_identifier] += 1
+                current_chunk = []
+        elif current_chunk:
+            # If in a chunk, add the row to the current chunk
+            current_chunk.append(row)
+
+
+def load_data_set(name, split=0.2):
+    train_data = {}
+    test_data = {}
+    path = os.path.join("data/", "training/", name)
+    for file in os.listdir(path):
+        if not file.endswith(".pickle"):
+            continue
+    
+        marker = file.split('.')[0]
+        with open(os.path.join(path, file), 'rb') as f:
+            temp = pickle.load(f)
+            rd.shuffle(temp)
+            split_idx = int(len(temp)*split)
+            print(split_idx)
+            train_data[marker] = temp[:-split_idx]
+            test_data[marker] = temp[-split_idx:]
+
+    return train_data, test_data
+    
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -187,14 +260,4 @@ if __name__ == "__main__":
     print("Starting..")
     processor.process_data_sources()
     print("Done.")
-
-
-    # count = 0
-    # while count < 2048:
-        # data = handler.get_data_packet()
-        # if data is None:
-            # break
-        # count = count + len(data)
-
-    # print(count)
 
