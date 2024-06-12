@@ -5,8 +5,27 @@ import pandas as pd
 import numpy as np
 import random as rd
 
+# creates appropriate folders for data processing in the current directory.
+def init_processing():
+    """
+    Creates the following file structure in the current working directory:\n
+    .data/\n
+        session/ - raw session data\n
+        processed/ - processed session data\n
+        chunks/ - processed chunks\n
+        training/ - training data
+    """
+    data_path = "data"
+    session_path = os.path.join(data_path, "session")
+    processed_path = os.path.join(data_path, "processed")
+    chunks_path = os.path.join(data_path, "chunks")
+    training_path = os.path.join(data_path, "training")
+    os.makedirs(session_path, exist_ok=True)
+    os.makedirs(processed_path, exist_ok=True)
+    os.makedirs(chunks_path, exist_ok=True)
+    os.makedirs(training_path, exist_ok=True)
 
-
+# creates chunk files from a labeled session file (processed or raw)
 def prepare_chunk_data(filename, output_dir, start_identifiers=[], sep='\t'):
     # Define chunk end identifiers
     end_identifiers = [-x for x in start_identifiers]
@@ -50,7 +69,75 @@ def prepare_chunk_data(filename, output_dir, start_identifiers=[], sep='\t'):
 
     return True
 
+# processes the chunk files and creates training files
+def process_chunks(chunk_dir, output_dir, func, sep='\t'):
+    """
+    Processes CSV files in the specified chunk directory using a given function,
+    and saves the resulting data to separate files in the output directory.
 
+    Parameters:
+    chunk_dir (str): The directory containing the input CSV files.
+    output_dir (str): The directory where the processed files will be saved.
+    func (callable): A function that takes a file path as input and returns a list of dictionaries.
+                     Each dictionary contains multiple DataFrames, with the keys representing data names.
+    sep (str, optional): The separator to use when saving the CSV files. Defaults to '\t'.
+
+    The `func` parameter:
+    - The provided function should accept a single argument: the file path of a CSV file.
+    - It should return a list of dictionaries. Each dictionary should have string keys and 
+      pandas DataFrame values. For example:
+      [
+          {
+              'timeseries': pd.DataFrame(...),
+              'fftdata': pd.DataFrame(...),
+              'other_data': pd.DataFrame(...),
+              ...
+          },
+          ...
+      ]
+
+    Usage:
+    - Place the input CSV files in the `chunk_dir`.
+    - Ensure the `output_dir` exists or can be created.
+    - Define a processing function `func` that returns the appropriate structure.
+    - Call `process_chunks(chunk_dir, output_dir, func)` to process the files.
+
+    Example:
+    ```python
+    def example_func(file_path):
+        # Process the file and return a list of dictionaries with DataFrames
+        return [
+            {
+                'timeseries': pd.DataFrame(...),
+                'fftdata': pd.DataFrame(...),
+                'other_data': pd.DataFrame(...),
+            },
+            ...
+        ]
+
+    process_chunks('/path/to/chunks', '/path/to/output', example_func)
+    ```
+
+    """
+    for filename in os.listdir(chunk_dir):
+        if filename.endswith('.csv'):
+            file_path = os.path.join(chunk_dir, filename)
+            chunk_result = func(file_path)
+            
+            # Save each chunk to a separate file
+            for idx, data_dict in enumerate(chunk_result):
+                name, ext = os.path.splitext(filename)
+                
+                for data_name, data_frame in data_dict.items():
+                    processed_filename = f"{name}_{idx + 1}_{data_name}{ext}"
+                    processed_file_path = os.path.join(output_dir, processed_filename)
+                    os.makedirs(output_dir, exist_ok=True)
+
+                    # Save the data to a new file
+                    data_frame.to_csv(processed_file_path, index=False, header=False, sep=sep)
+
+
+# creates a training data set from training files. TODO Make a full documentation for this so there's no confusion.
 def create_training_data(input_dir, output_file, groups, func_dict, sep='\t'):
 
     """
