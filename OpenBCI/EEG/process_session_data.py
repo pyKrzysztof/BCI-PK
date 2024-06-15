@@ -13,8 +13,13 @@ from brainflow.data_filter import DataFilter, WindowOperations, DetrendOperation
     session/ - raw session data - input directory
     processed/ - processed session data - first stage
     chunks/ - processed chunks - second stage
-    training/ - training data - output directory
+    training/ - output directory
+        data/ - separate packet data files
+        x.pickle - serialized action x training data
+        y.pickle - serialized action y training data
+        ...
     process_functions/ - processing scripts directory - configuration
+
 """
 
 data_path = "data"

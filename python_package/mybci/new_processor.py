@@ -12,7 +12,7 @@ from brainflow import BoardShim
 
 def save_to_file(data: pd.DataFrame, path, name, sep):
     file = os.path.join(path, name)
-    data.to_csv(file, sep)
+    data.to_csv(path_or_buf=file, sep=sep, header=None, index=False)
 
 
 
@@ -54,17 +54,21 @@ def create_training_data(input_dir, groups, func_dict={}, sep='\t'):
         # Check if the label is in the specified groups
         if idx1 not in groups:
             continue
+        
 
         # Read the file
         filepath = os.path.join(input_dir, filename)
         data = np.genfromtxt(filepath, delimiter=sep)
         
+        # print(filename)
+        # print(data.shape)
+
         # Process the data using the corresponding function
         if filetype in func_dict:
             processed_data = func_dict[filetype](data)
         else:
-            continue  # Skip if there is no corresponding function for this file type
-        
+            processed_data = data
+
         # Check if there's already an entry for this chunk
         existing_entry = next((entry for entry in grouped_data[idx1] if entry.get('chunk_index') == idx2 and entry.get('packet_number') == idx3), None)
         
@@ -80,6 +84,8 @@ def create_training_data(input_dir, groups, func_dict={}, sep='\t'):
                 filetype: processed_data
             }
             grouped_data[idx1].append(new_entry)
+
+    # print(grouped_data)
 
     return grouped_data
 
@@ -142,7 +148,7 @@ class ChunkHandler:
     def process_data_packet(self, data_packet):
         # Convert the data packet to a DataFrame
         df = pd.DataFrame(data_packet)
-        output = {}
+        output = {'complete': False}
         # Iterate through the DataFrame
         for _, row in df.iterrows():
             last_col_value = row.iloc[-1]
@@ -164,6 +170,7 @@ class ChunkHandler:
                     output['data'] = pd.DataFrame(self.current_chunk)
                     output['label'] = int(start_identifier)
                     output['counter'] = self.counters[start_identifier]
+                    output['complete'] = True
                     self.counters[start_identifier] += 1
                     self.current_chunk = []
 
@@ -191,7 +198,7 @@ class ChunkHandler:
 class NewDataProcessor:
     
     def __init__(self, config):
-        self.params = config
+        self.params = dict(config)
         self.buffer = deque(maxlen=self.params['buffer_size'])
         self.reader = self._create_packet_reader()
         self.chunk_handlers = {name: ChunkHandler(self.params['action_markers'], self.params['sep']) for name in self.params['filter_func'].keys()}
@@ -200,6 +207,15 @@ class NewDataProcessor:
             self._update_func = self._update_live if not self.params['live_pipeline'] else self._update_live_pipeline
         else:
             self._update_func = self._update_file
+
+        if self.params['save_chunks']:
+            self.params['output_path_chunks'] = self.params['output_path_chunks'] + self.params['name'] + "/"
+            os.makedirs(self.params['output_path_chunks'], exist_ok=True)
+        
+        self.params['output_path_training_data'] = self.params['output_path_training_data'] + self.params['name'] + "/"
+        os.makedirs(self.params['output_path_training_data'], exist_ok=True)
+        os.makedirs(self.params['output_path_training_dataset'], exist_ok=True)
+
 
 
     def update(self) -> bool:
@@ -238,18 +254,19 @@ class NewDataProcessor:
         label = chunk['label']
         i = self.params['ml_prepare_chunk_start_offset']
         while i < len(chunk_data):
-
-            end_index = i + self.params['packet_size']
+            i = i + self.params['packet_size']
+            end_index = i
             start_index = end_index - self.params['ml_prepare_size']
 
             # Ensure no out of bounds
             if end_index > len(chunk_data):
                 break
 
-            data = chunk_data.iloc[start_index:end_index]
+            data = chunk_data.iloc[start_index:end_index, self.params['channel_column_ids'] + self.params['ml_prepare_extra_columns']]
 
-            output = func(data)
+            output = {'data': func(data, self.params), 'label': label, 'counter':chunk['counter']}
             output_data.append(output)
+
 
         return output_data
 
@@ -260,9 +277,9 @@ class NewDataProcessor:
             return 0
         
         for filter in self.params['filter_func'].keys():
-            filtered_packet = self.params['filter_func'][filter](np.array(self.buffer)[-self.params['filter_size']:])
-            chunk = self.chunk_handler[filter].process_data_packet(filtered_packet) # output dict keys: label, counter, data
-            
+            # print(filter)
+            filtered_packet = self.params['filter_func'][filter](np.array(self.buffer)[-self.params['filter_size']:], self.params)
+            chunk = self.chunk_handlers[filter].process_data_packet(filtered_packet) # output dict keys: label, counter, data, complete
             if not chunk['complete']:
                 continue
 
@@ -272,21 +289,23 @@ class NewDataProcessor:
                 os.makedirs(path, exist_ok=True)
                 name = f"{chunk['label']}_{chunk['counter']}.csv"
                 save_to_file(chunk['data'], path, name, self.params['sep'])
+                # print("Saved full chunk:", name)
 
             # ml prep
             for func in self.params['ml_prepare_func'].keys():
+                # print(func)
                 data = self._iterate_chunk(chunk, self.params['ml_prepare_func'][func])
-                data['filter'] = filter
-                data['func'] = func
-
+                # print("chunk ml processed")
                 # save ml data
                 path = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
                 os.makedirs(path, exist_ok=True)
-                for idx, ml_packet in enumerate(data['data']):
-                    for data_name, ml_packet_data in ml_packet.items():
-                        name = f"{data['label']}_{data['counter']}_{idx}_{data_name}.csv"
+                
+                for idx, ml_packet in enumerate(data):
+                    # print(ml_packet)
+                    for data_name, ml_packet_data in ml_packet['data'].items():
+                        name = f"{ml_packet['label']}_{ml_packet['counter']}_{idx}_{data_name}.csv"
                         save_to_file(ml_packet_data, path, name, self.params['sep'])
-                        
+
         return 1
 
 
@@ -298,10 +317,10 @@ class NewDataProcessor:
                 
                 output_file = os.path.join(self.params['output_path_training_dataset'], f"{self.params['name']}_{filter}_{func}.pickle")
                 with open(output_file, 'wb') as f:
-                    pickle.dump(data, output_file)
+                    pickle.dump(data, f)
 
         if not self.params['keep_seperate_training_data']:
             for filter in self.params['filter_func'].keys():
-                shutil.rmtree(os.path.join(self.params['output_path_training_data'], filter+'/'))
+                shutil.rmtree(self.params['output_path_training_data'][:-1])
 
         return 0
