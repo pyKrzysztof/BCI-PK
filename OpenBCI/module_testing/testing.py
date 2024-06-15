@@ -9,22 +9,19 @@ from brainflow.data_filter import DataFilter, WindowOperations
 
 
 
+def session_func():
+    pass
 
 
 
 
-
-
-
-
-
-def chunk_func(file_path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def chunk_func(chunk_path) -> tuple[pd.DataFrame, pd.DataFrame]:
     N = 32
     X = 128
     SKIP = 250
     sep = "\t"
     # Load the CSV file
-    df = pd.read_csv(file_path, header=None, sep=sep)
+    df = pd.read_csv(chunk_path, header=None, sep=sep)
 
     # List to store the results
     result = []

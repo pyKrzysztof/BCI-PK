@@ -7,6 +7,12 @@ from collections import deque
 
 
 
+
+
+
+
+
+
 class DataHandler:
     def __init__(self, data_source, packet_size, is_live=False, sep=','):
         self.data_source = data_source
@@ -112,3 +118,47 @@ class DataProcessor:
             processed_data_array = np.vstack(processed_data[:-1])
             df = pd.DataFrame(processed_data_array)
             df.to_csv(output_file, index=False, header=False, sep=self.sep_file, float_format='%.6f')
+
+
+def prepare_chunk_data(filename, output_dir, start_identifiers=[], sep='\t'):
+    # Define chunk end identifiers
+    end_identifiers = [-x for x in start_identifiers]
+
+    # Read the CSV file
+    df = pd.read_csv(filename, sep=sep)
+
+    # Variables to keep track of the current chunk and counters for each identifier
+    current_chunk = []
+    counters = {start: 0 for start in start_identifiers}
+
+    # Iterate through the DataFrame
+    for _, row in df.iterrows():
+        last_col_value = row.iloc[-1]
+
+        if last_col_value in start_identifiers:
+            
+            # Start a new chunk
+            if current_chunk:
+                current_chunk = []  # Reset the current chunk if it was not empty
+            current_chunk = [row]
+
+        elif last_col_value in end_identifiers and current_chunk:
+            start_identifier = abs(last_col_value)
+            if current_chunk[0].iloc[-1] == start_identifier:
+
+                # End the chunk if the end identifier matches the start identifier
+                current_chunk.append(row)
+
+                # Save the chunk to a file
+                chunk_df = pd.DataFrame(current_chunk)
+                filename_prefix = f"{int(start_identifier)}_{counters[start_identifier]}"
+                chunk_df.to_csv(os.path.join(output_dir, f'{filename_prefix}.csv'), header=False, index=False, sep=sep)
+                counters[start_identifier] += 1
+                current_chunk = []
+
+        elif current_chunk:
+
+            # If in a chunk, add the row to the current chunk
+            current_chunk.append(row)
+
+    return True
