@@ -1,10 +1,93 @@
+import os
 import time
+import pickle
+import shutil
 
 import numpy as np
 import pandas as pd
 
 from collections import deque
 from brainflow import BoardShim
+
+
+def save_to_file(data: pd.DataFrame, path, name, sep):
+    file = os.path.join(path, name)
+    data.to_csv(file, sep)
+
+
+
+# creates a training data set from training files. TODO Make a full documentation for this so there's no confusion.
+def create_training_data(input_dir, groups, func_dict={}, sep='\t'):
+
+    """
+    Creates training data from files in the input directory, applies given functions, and saves the result to a pickle file.
+    
+    Parameters:
+    - input_dir (str): The directory containing the input data files.
+    - output_file (str): The pickle output file.
+    - groups (list)(int): A list of integer values that represent the present data labels.
+    - func_dict (dict): A dictionary where keys are file type identifiers and values are functions to process those files.
+
+    Returns:
+    - a dictionary with 'groups' as keys, each containing a list of dictionaries with keys matching the keys in 'func_dict' and an additional 'label' key.
+
+    IMPORTANT: Files in input_dir must be in form of idx1_idx2_idx3_filetype.csv, where:
+    - idx1 is the label, 
+    - idx2 is the chunk index (insignificant but must match across different 'filetype' files),
+    - idx3 is the packet number of that chunk.
+    """
+    # Dictionary to hold the grouped data
+    grouped_data = {group: [] for group in groups}
+    
+    # Iterate through files in the input directory
+    for filename in os.listdir(input_dir):
+        # Split the filename to extract idx1, idx2, idx3, and filetype
+        parts = filename.split('_')
+        if len(parts) < 4:
+            continue  # Skip files that do not match the expected pattern
+        
+        idx1 = int(parts[0])  # Label
+        idx2 = parts[1]  # Chunk index
+        idx3 = parts[2]  # Packet number
+        filetype = parts[3].split('.')[0]  # File type without the extension
+
+        # Check if the label is in the specified groups
+        if idx1 not in groups:
+            continue
+
+        # Read the file
+        filepath = os.path.join(input_dir, filename)
+        data = np.genfromtxt(filepath, delimiter=sep)
+        
+        # Process the data using the corresponding function
+        if filetype in func_dict:
+            processed_data = func_dict[filetype](data)
+        else:
+            continue  # Skip if there is no corresponding function for this file type
+        
+        # Check if there's already an entry for this chunk
+        existing_entry = next((entry for entry in grouped_data[idx1] if entry.get('chunk_index') == idx2 and entry.get('packet_number') == idx3), None)
+        
+        if existing_entry:
+            # Update the existing entry with the new file type data
+            existing_entry[filetype] = processed_data
+        else:
+            # Create a new entry
+            new_entry = {
+                'label': idx1,
+                'chunk_index': idx2,
+                'packet_number': idx3,
+                filetype: processed_data
+            }
+            grouped_data[idx1].append(new_entry)
+
+    return grouped_data
+
+
+
+
+
+
 
 
 
@@ -123,6 +206,7 @@ class NewDataProcessor:
         packet = self.reader.get_data_packet()
         self.buffer.extend(packet) # this will ignore empty arrays and extend with actual packet rows.
         
+        # if status returns 0 then it's over.
         status = self._update_func(packet)
         
         return status
@@ -139,7 +223,9 @@ class NewDataProcessor:
         return None
 
     def _update_live_pipeline(self, packet: np.ndarray):
+        """NOT IMPLEMENTED YET, FOR NOW USE 'session.py' SCRIPT."""
         # process the pipeline
+        # NOT IMPLEMENTED YET, FOR NOW USE 
         pass
 
     def _update_live(self, packet: np.ndarray):
@@ -163,13 +249,15 @@ class NewDataProcessor:
             data = chunk_data.iloc[start_index:end_index]
 
             output = func(data)
-            output['label'] = label
-            output['chunk_counter'] = chunk['counter']
             output_data.append(output)
 
         return output_data
 
     def _update_file(self, packet: np.ndarray):
+        if not packet.size: # file is empty, processing ended - create training sets if configured to do so.
+            if self.params['save_training_dataset']:
+                return self.create_training_sets()
+            return 0
         
         for filter in self.params['filter_func'].keys():
             filtered_packet = self.params['filter_func'][filter](np.array(self.buffer)[-self.params['filter_size']:])
@@ -178,17 +266,42 @@ class NewDataProcessor:
             if not chunk['complete']:
                 continue
 
+            # save chunk
             if self.params['save_chunks']:
-                # save chunk
-                pass
+                path = os.path.join(self.params['output_path_chunks'], filter+'/')
+                os.makedirs(path, exist_ok=True)
+                name = f"{chunk['label']}_{chunk['counter']}.csv"
+                save_to_file(chunk['data'], path, name, self.params['sep'])
 
+            # ml prep
             for func in self.params['ml_prepare_func'].keys():
                 data = self._iterate_chunk(chunk, self.params['ml_prepare_func'][func])
                 data['filter'] = filter
                 data['func'] = func
-            
-                if self.params['save_training_data']:
-                    # save data
-                    pass
 
-        
+                # save ml data
+                path = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
+                os.makedirs(path, exist_ok=True)
+                for idx, ml_packet in enumerate(data['data']):
+                    for data_name, ml_packet_data in ml_packet.items():
+                        name = f"{data['label']}_{data['counter']}_{idx}_{data_name}.csv"
+                        save_to_file(ml_packet_data, path, name, self.params['sep'])
+                        
+        return 1
+
+
+    def create_training_sets(self):
+        for filter in self.params['filter_func'].keys():
+            for func in self.params['ml_prepare_func'].keys():
+                input_dir = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
+                data = create_training_data(input_dir, self.params['action_markers'], {}, self.params['sep'])
+                
+                output_file = os.path.join(self.params['output_path_training_dataset'], f"{self.params['name']}_{filter}_{func}.pickle")
+                with open(output_file, 'wb') as f:
+                    pickle.dump(data, output_file)
+
+        if not self.params['keep_seperate_training_data']:
+            for filter in self.params['filter_func'].keys():
+                shutil.rmtree(os.path.join(self.params['output_path_training_data'], filter+'/'))
+
+        return 0

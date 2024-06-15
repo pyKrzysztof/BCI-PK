@@ -158,7 +158,6 @@ def create_training_data(input_dir, output_file, groups, func_dict, sep='\t'):
     - idx3 is the packer number of that chunk.
 
     """
-    print(output_file)
     # Dictionary to hold the grouped data
     grouped_data = {group: [] for group in groups}
     
@@ -188,14 +187,8 @@ def create_training_data(input_dir, output_file, groups, func_dict, sep='\t'):
         else:
             continue  # Skip if there is no corresponding function for this file type
         
-        # Prepare the data dictionary
-        data_dict = {
-            'label': idx1,
-            filetype: processed_data
-        }
-        
         # Check if there's already an entry for this chunk
-        existing_entry = next((entry for entry in grouped_data[idx1] if entry.get('chunk_index') == idx2 and entry.get('packer_number') == idx3), None)
+        existing_entry = next((entry for entry in grouped_data[idx1] if entry.get('chunk_index') == idx2 and entry.get('packet_number') == idx3), None)
         
         if existing_entry:
             # Update the existing entry with the new file type data
@@ -203,9 +196,9 @@ def create_training_data(input_dir, output_file, groups, func_dict, sep='\t'):
         else:
             # Create a new entry
             new_entry = {
-                'chunk_index': idx2,
-                'packer_number': idx3,
                 'label': idx1,
+                'chunk_index': idx2,
+                'packet_number': idx3,
                 filetype: processed_data
             }
             grouped_data[idx1].append(new_entry)
