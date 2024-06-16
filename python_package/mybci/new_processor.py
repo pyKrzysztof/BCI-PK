@@ -99,10 +99,12 @@ def create_training_data(input_dir, groups, func_dict={}, sep='\t'):
 
 class PacketReader:
     
-    def __init__(self, data_source, packet_size, is_live=False, sep='\t'):
+    def __init__(self, data_source, packet_size, buffer_size, is_live=False, sep='\t'):
         self.data_source = data_source
+        self.name = os.path.splitext(os.path.basename(data_source))[0]
         self.is_live = is_live
         self.packet_size = packet_size
+        self.buffer = deque(maxlen=buffer_size)
         self.sep=sep
 
         if self.is_live:
@@ -144,6 +146,7 @@ class ChunkHandler:
         self.sep = sep
         self.current_chunk = []
         self.counters = {start: 0 for start in start_identifiers}
+        
 
     def process_data_packet(self, data_packet):
         # Convert the data packet to a DataFrame
@@ -194,128 +197,126 @@ class ChunkHandler:
         return output
 
 
-
 class NewDataProcessor:
-    
     def __init__(self, config):
         self.params = dict(config)
-        self.buffer = deque(maxlen=self.params['buffer_size'])
-        self.reader = self._create_packet_reader()
-        self.chunk_handlers = {name: ChunkHandler(self.params['action_markers'], self.params['sep']) for name in self.params['filter_func'].keys()}
+        self.chunk_handlers = {}
+        self.readers = {}
 
         if self.params['use_board_device']:
+            self.readers['live'] = self._create_packet_reader()
             self._update_func = self._update_live if not self.params['live_pipeline'] else self._update_live_pipeline
+            self.update = lambda: self._update(self.readers['live'])
         else:
+            files = self.params['session_file']
+            if isinstance(files, str):
+                files = [files]
+            elif not isinstance(files, (list, tuple)):
+                raise TypeError(files)
+
+            for file in files:
+                filename = os.path.splitext(os.path.basename(file))[0]
+                self.chunk_handlers[filename] = {name: ChunkHandler(self.params['action_markers'], self.params['sep']) for name in self.params['filter_func'].keys()}
+                self.readers[filename] = PacketReader(file, self.params['packet_size'], self.params['buffer_size'], False, self.params['sep'])
+
             self._update_func = self._update_file
 
         if self.params['save_chunks']:
-            self.params['output_path_chunks'] = self.params['output_path_chunks'] + self.params['name'] + "/"
+            self.params['output_path_chunks'] = os.path.join(self.params['output_path_chunks'], self.params['name'], "")
             os.makedirs(self.params['output_path_chunks'], exist_ok=True)
-        
-        self.params['output_path_training_data'] = self.params['output_path_training_data'] + self.params['name'] + "/"
+        self.params['output_path_training_data'] = os.path.join(self.params['output_path_training_data'], self.params['name'], "")
         os.makedirs(self.params['output_path_training_data'], exist_ok=True)
         os.makedirs(self.params['output_path_training_dataset'], exist_ok=True)
 
+    def process(self):
+        for filename, reader in self.readers.items():
+            print(filename, reader.data_source)
+            while self._update(reader):
+                pass
 
-
-    def update(self) -> bool:
-        packet = self.reader.get_data_packet()
-        self.buffer.extend(packet) # this will ignore empty arrays and extend with actual packet rows.
-        
-        # if status returns 0 then it's over.
-        status = self._update_func(packet)
-        
+    def _update(self, reader) -> bool:
+        packet = reader.get_data_packet()
+        reader.buffer.extend(packet)
+        status = self._update_func(packet, reader.buffer, reader.name)
         return status
-        
-    
+
     def _create_packet_reader(self):
+        live = False
         if self.params['use_board_device']:
             board = self._open_board()
-            return PacketReader(board, self.params['packet_size'], True, self.params['sep'])
-        
-        return PacketReader(self.params['session_file'], self.params['packet_size'], False, self.params['sep'])
-    
+            live = True
+        return PacketReader(self.params['session_file'], self.params['packet_size'], live, self.params['sep'])
+
     def _open_board(self):
         return None
 
     def _update_live_pipeline(self, packet: np.ndarray):
         """NOT IMPLEMENTED YET, FOR NOW USE 'session.py' SCRIPT."""
-        # process the pipeline
-        # NOT IMPLEMENTED YET, FOR NOW USE 
         pass
 
     def _update_live(self, packet: np.ndarray):
-        # check for timeout
         pass
 
-    def _iterate_chunk(self, chunk: dict[str:int, str:int, str:pd.DataFrame], func):
-        output_data = []
-        chunk_data = chunk['data']
-        label = chunk['label']
-        i = self.params['ml_prepare_chunk_start_offset']
-        while i < len(chunk_data):
-            i = i + self.params['packet_size']
-            end_index = i
-            start_index = end_index - self.params['ml_prepare_size']
+    def _update_file(self, packet: np.ndarray, buffer: deque, name: str):
+        chunk_handlers = self.chunk_handlers[name]
 
-            # Ensure no out of bounds
-            if end_index > len(chunk_data):
-                break
-
-            data = chunk_data.iloc[start_index:end_index, self.params['channel_column_ids'] + self.params['ml_prepare_extra_columns']]
-
-            output = {'data': func(data, self.params), 'label': label, 'counter':chunk['counter']}
-            output_data.append(output)
-
-
-        return output_data
-
-    def _update_file(self, packet: np.ndarray):
-        if not packet.size: # file is empty, processing ended - create training sets if configured to do so.
+        if not packet.size:
             if self.params['save_training_dataset']:
-                return self.create_training_sets()
+                return self.create_training_sets(name)
             return 0
         
-        for filter in self.params['filter_func'].keys():
-            # print(filter)
-            filtered_packet = self.params['filter_func'][filter](np.array(self.buffer)[-self.params['filter_size']:], self.params)
-            chunk = self.chunk_handlers[filter].process_data_packet(filtered_packet) # output dict keys: label, counter, data, complete
+        for filter in self.params['filter_func']:
+            filtered_packet = self.params['filter_func'][filter](np.array(buffer)[-self.params['filter_size']:], self.params)
+            chunk = chunk_handlers[filter].process_data_packet(filtered_packet)
             if not chunk['complete']:
                 continue
 
-            # save chunk
             if self.params['save_chunks']:
-                path = os.path.join(self.params['output_path_chunks'], filter+'/')
+                path = os.path.join(self.params['output_path_chunks'], name, filter)
                 os.makedirs(path, exist_ok=True)
                 name = f"{chunk['label']}_{chunk['counter']}.csv"
                 save_to_file(chunk['data'], path, name, self.params['sep'])
-                # print("Saved full chunk:", name)
 
-            # ml prep
-            for func in self.params['ml_prepare_func'].keys():
-                # print(func)
+            for func in self.params['ml_prepare_func']:
                 data = self._iterate_chunk(chunk, self.params['ml_prepare_func'][func])
-                # print("chunk ml processed")
-                # save ml data
-                path = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
+                path = os.path.join(self.params['output_path_training_data'], name, filter, func)
                 os.makedirs(path, exist_ok=True)
                 
                 for idx, ml_packet in enumerate(data):
-                    # print(ml_packet)
                     for data_name, ml_packet_data in ml_packet['data'].items():
                         name = f"{ml_packet['label']}_{ml_packet['counter']}_{idx}_{data_name}.csv"
                         save_to_file(ml_packet_data, path, name, self.params['sep'])
 
         return 1
 
+    def _iterate_chunk(self, chunk: dict, func):
+        output_data = []
+        chunk_data = chunk['data']
+        label = chunk['label']
+        i = self.params['ml_prepare_chunk_start_offset']
+        
+        while i < len(chunk_data):
+            i = i + self.params['packet_size']
+            end_index = i
+            start_index = end_index - self.params['ml_prepare_size']
 
-    def create_training_sets(self):
+            if end_index > len(chunk_data):
+                break
+
+            data = chunk_data.iloc[start_index:end_index, self.params['channel_column_ids'] + self.params['ml_prepare_extra_columns']]
+
+            output = {'data': func(data, self.params), 'label': label, 'counter': chunk['counter']}
+            output_data.append(output)
+
+        return output_data
+
+    def create_training_sets(self, filename):
         for filter in self.params['filter_func'].keys():
             for func in self.params['ml_prepare_func'].keys():
-                input_dir = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
+                input_dir = os.path.join(self.params['output_path_training_data'], filename+'/', filter+'/', func+'/')
                 data = create_training_data(input_dir, self.params['action_markers'], {}, self.params['sep'])
                 
-                output_file = os.path.join(self.params['output_path_training_dataset'], f"{self.params['name']}_{filter}_{func}.pickle")
+                output_file = os.path.join(self.params['output_path_training_dataset'], f"{self.params['name']}_{filename}_{filter}_{func}.pickle")
                 with open(output_file, 'wb') as f:
                     pickle.dump(data, f)
 

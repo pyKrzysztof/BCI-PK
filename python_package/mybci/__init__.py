@@ -1,5 +1,7 @@
 from . import utils
 
+from .config import get_base_config
+
 from .datahandlers import DataHandler
 from .datahandlers import DataProcessor
 
