@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from collections import deque
-from brainflow import BoardShim
+from brainflow import BoardShim, BoardIds, BrainFlowInputParams
 
 
 def save_to_file(data: pd.DataFrame, path, name, sep):
@@ -101,7 +101,6 @@ class PacketReader:
     
     def __init__(self, data_source, packet_size, buffer_size, is_live=False, sep='\t'):
         self.data_source = data_source
-        self.name = os.path.splitext(os.path.basename(data_source))[0]
         self.is_live = is_live
         self.packet_size = packet_size
         self.buffer = deque(maxlen=buffer_size)
@@ -113,12 +112,14 @@ class PacketReader:
                 raise ValueError("For live mode, data_source must be an instance of BoardShim.")
             self.board = self.data_source
             self.get_data_packet = self._get_live_data
+            self.name = "live"
         else:
             if not isinstance(self.data_source, str):
                 raise ValueError("For non-live mode, data_source must be a file path.")
             self.filepath = self.data_source
             self.data_iter = self._file_data_generator()
             self.get_data_packet = self._get_file_data
+            self.name = os.path.splitext(os.path.basename(data_source))[0]
 
     def _file_data_generator(self):
         for packet in pd.read_csv(self.filepath, chunksize=self.packet_size, sep=self.sep):
@@ -197,7 +198,8 @@ class ChunkHandler:
         return output
 
 
-class NewDataProcessor:
+class DataProcessor:
+
     def __init__(self, config):
         self.params = dict(config)
         self.chunk_handlers = {}
@@ -205,6 +207,7 @@ class NewDataProcessor:
 
         if self.params['use_board_device']:
             self.readers['live'] = self._create_packet_reader()
+            self.filtered_buffers = {name: deque(maxlen=self.params['ml_prepare_size']) for name in self.params['filter_func'].keys()}
             self._update_func = self._update_live if not self.params['live_pipeline'] else self._update_live_pipeline
             self.update = lambda: self._update(self.readers['live'])
         else:
@@ -225,6 +228,7 @@ class NewDataProcessor:
             self.params['output_path_chunks'] = os.path.join(self.params['output_path_chunks'], self.params['name'], "")
             os.makedirs(self.params['output_path_chunks'], exist_ok=True)
         self.params['output_path_training_data'] = os.path.join(self.params['output_path_training_data'], self.params['name'], "")
+        self.params['output_path_training_dataset'] = os.path.join(self.params['output_path_training_dataset'], self.params['name'], "")
         os.makedirs(self.params['output_path_training_data'], exist_ok=True)
         os.makedirs(self.params['output_path_training_dataset'], exist_ok=True)
 
@@ -242,20 +246,41 @@ class NewDataProcessor:
 
     def _create_packet_reader(self):
         live = False
+        source = self.params['session_file']
         if self.params['use_board_device']:
-            board = self._open_board()
+            source = self._open_board()
             live = True
-        return PacketReader(self.params['session_file'], self.params['packet_size'], live, self.params['sep'])
+            
+        return PacketReader(source, self.params['packet_size'], live, self.params['sep'])
 
     def _open_board(self):
-        return None
+        params = BrainFlowInputParams()
+        board = BoardShim(BoardIds.SYNTHETIC_BOARD, params)
+        board.prepare_session()
+        board.start_stream()
+        return board
 
     def _update_live_pipeline(self, packet: np.ndarray):
         """NOT IMPLEMENTED YET, FOR NOW USE 'session.py' SCRIPT."""
         pass
 
-    def _update_live(self, packet: np.ndarray):
-        pass
+    def _update_live(self, packet: np.ndarray, buffer: deque, name: str):
+        if not packet.size:
+            # handle timeouts here
+            return 1
+        
+        if len(buffer) < self.params['ml_prepare_size']:
+            return 1
+            
+        for filter_name, filter_func in self.params['filter_func'].items():
+            filtered_packet = filter_func(np.array(buffer)[-self.params['filter_size']:], self.params)
+            self.filtered_buffers[filter_name].extend(filtered_packet)
+            for func in self.params['ml_prepare_func']:
+                data = func(np.array(self.filtered_buffers[filter_name])[-self.params['ml_prepare_func']:], self.params)
+
+                for pname, pfunc in self.params['prediction_functions'].items():
+                    pfunc(data)
+
 
     def _update_file(self, packet: np.ndarray, buffer: deque, name: str):
         chunk_handlers = self.chunk_handlers[name]
@@ -274,14 +299,14 @@ class NewDataProcessor:
             if self.params['save_chunks']:
                 path = os.path.join(self.params['output_path_chunks'], name, filter)
                 os.makedirs(path, exist_ok=True)
-                name = f"{chunk['label']}_{chunk['counter']}.csv"
-                save_to_file(chunk['data'], path, name, self.params['sep'])
+                chunk_name = f"{chunk['label']}_{chunk['counter']}.csv"
+                save_to_file(chunk['data'], path, chunk_name, self.params['sep'])
 
             for func in self.params['ml_prepare_func']:
                 data = self._iterate_chunk(chunk, self.params['ml_prepare_func'][func])
-                path = os.path.join(self.params['output_path_training_data'], name, filter, func)
+                path = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
                 os.makedirs(path, exist_ok=True)
-                
+                # print(path)
                 for idx, ml_packet in enumerate(data):
                     for data_name, ml_packet_data in ml_packet['data'].items():
                         name = f"{ml_packet['label']}_{ml_packet['counter']}_{idx}_{data_name}.csv"
@@ -313,15 +338,16 @@ class NewDataProcessor:
     def create_training_sets(self, filename):
         for filter in self.params['filter_func'].keys():
             for func in self.params['ml_prepare_func'].keys():
-                input_dir = os.path.join(self.params['output_path_training_data'], filename+'/', filter+'/', func+'/')
+                input_dir = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
+                # print(input_dir)
                 data = create_training_data(input_dir, self.params['action_markers'], {}, self.params['sep'])
-                
-                output_file = os.path.join(self.params['output_path_training_dataset'], f"{self.params['name']}_{filename}_{filter}_{func}.pickle")
+                path = os.path.join(self.params['output_path_training_dataset'], filter+'/', func+'/')
+                os.makedirs(path, exist_ok=True)
+                output_file = os.path.join(path, f"{self.params['name']}_{filename}_{filter}_{func}.pickle")
                 with open(output_file, 'wb') as f:
                     pickle.dump(data, f)
 
-        if not self.params['keep_seperate_training_data']:
-            for filter in self.params['filter_func'].keys():
-                shutil.rmtree(self.params['output_path_training_data'][:-1])
+            if not self.params['keep_seperate_training_data']:
+                shutil.rmtree(os.path.join(self.params['output_path_training_data'], filter+'/'))
 
         return 0

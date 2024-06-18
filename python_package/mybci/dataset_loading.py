@@ -2,6 +2,7 @@ import os
 import pickle
 import random
 
+seed = None
 
 
 def load_single_dataset(filepath):
@@ -34,7 +35,7 @@ def load_all_datasets(directory_path):
 
     # Load all pickle files in the specified directory
     for filename in os.listdir(directory_path):
-        if filename.endswith('.pkl'):
+        if filename.endswith('.pickle'):
             filepath = os.path.join(directory_path, filename)
             with open(filepath, 'rb') as f:
                 data = pickle.load(f)
@@ -56,11 +57,14 @@ def shuffle_and_split_group(group_data, split):
     Returns:
         - A tuple (train_data, test_data) for the group.
     """
-    random.shuffle(group_data)
+    if seed is not None:
+        random.Random(seed).shuffle(group_data)
+    else:
+        random.shuffle(group_data)
     split_index = int(len(group_data) * split)
     return group_data[split_index:], group_data[:split_index]
 
-def load_and_split_data(path, split, load_all=True):
+def load_and_split_data(path, split, load_all=True) :
     """
     Loads training data from .pickle files in a directory or a single file, shuffles the data, and splits into train and test data.
 
@@ -72,17 +76,30 @@ def load_and_split_data(path, split, load_all=True):
     Returns:
         - A tuple (train_data, test_data) where train_data is a list of dictionaries and test_data is a dictionary with group labels as keys and lists of data entries as values.
     """
+    files = []
     if load_all:
-        data = load_all_datasets(path)
+        # data = load_all_datasets(path)
+        for filename in os.listdir(path):
+            if filename.endswith('.pickle'):
+                files.append(os.path.join(path, filename))
+
     else:
-        data = load_single_dataset(path)
+        files = [path, ]
 
     train_data = []
-    test_data = {label: [] for label in data.keys()}
+    test_data = {}
 
-    for group_label, group_data in data.items():
-        group_train_data, group_test_data = shuffle_and_split_group(group_data, split)
-        train_data.extend(group_train_data)
-        test_data[group_label].extend(group_test_data)
+    for file in files:
+        data = load_single_dataset(file)
+        test_data[os.path.basename(file)] = {label: [] for label in data.keys()}
+        for group_label, group_data in data.items():
+            group_train_data, group_test_data = shuffle_and_split_group(group_data, split)
+            train_data.extend(group_train_data)
+            test_data[os.path.basename(file)][group_label].extend(group_test_data)
+
+    if seed is not None:
+        random.Random(seed).shuffle(train_data)
+    else:
+        random.shuffle(train_data)
 
     return train_data, test_data
