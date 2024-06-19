@@ -40,8 +40,9 @@ def process_4(data, channel, sampling_rate):
     return data
 
 
-processes = [raw, process_2, process_3, process_4]
-
+# processes = [raw, process_2, process_3, process_4]
+# processes = [process_2, process_3, process_4]
+processes = [process_4,]
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=str, default="/dev/ttyUSB0", required=False, help="Device port.")

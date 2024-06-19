@@ -1,9 +1,0 @@
-{
-    "actions": ["L", "R"],
-    "time_between_actions_min": 2,
-    "time_between_actions_max": 4,
-    "n_samples": 2,
-    "call_on_enter": "comm_over_serial.init_serial",
-    "call_on_action": "comm_over_serial.send_action",
-    "call_on_exit": "comm_over_serial.close_serial"
-}

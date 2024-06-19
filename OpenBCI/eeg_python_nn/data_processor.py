@@ -21,6 +21,16 @@ def process_1(data):
                                 FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
     return data
 
+def process_2(data):
+    DataFilter.detrend(data, DetrendOperations.CONSTANT.value)
+    DataFilter.perform_bandpass(data, SAMPLING_RATE, 4.0, 45.0, 2,
+                                FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
+    DataFilter.perform_bandstop(data, SAMPLING_RATE, 48.0, 52.0, 2,
+                                FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
+    DataFilter.perform_bandstop(data, SAMPLING_RATE, 58.0, 62.0, 2,
+                                FilterTypes.BUTTERWORTH_ZERO_PHASE, 0)
+    return data
+
 
 # wrapper function
 def process_channel_data(func, channels):
@@ -55,7 +65,6 @@ def process_from_file(filepath, packet_size=32, process_list=[raw, ]):
     def get_packet(file_data):
         try:
             indices = list(range(0, packet_size, 1))
-            # print(file_data.shape)
             data = np.array(file_data[:, indices], order="C")
             file_data = np.delete(file_data, indices, axis=1)
         except IndexError:
@@ -73,16 +82,17 @@ def process_from_file(filepath, packet_size=32, process_list=[raw, ]):
     current_raw_data = np.copy(packet, order="C")
     packet_count = 1
     while packet is not None:
-
         current_raw_data = np.array(np.concatenate((current_raw_data, packet), axis=1), order="C")
         full_data = process_data(packet, full_data, handles)
         file_data, packet = get_packet(file_data)
         packet_count = packet_count + 1
+        print(packet_count)
 
     for i, data in enumerate(full_data):
         DataFilter.write_file(data, f"process_{i}_data.csv", "w")
 
 
 
+
 if __name__ == "__main__":
-    process_from_file("my_data.csv", packet_size=64, process_list=[raw, ])
+    process_from_file("dane/dane_50-50lewo_prawo.csv", packet_size=32, process_list=[process_1, process_2])
