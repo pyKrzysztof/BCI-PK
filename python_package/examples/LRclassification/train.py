@@ -12,15 +12,14 @@ import json
 epochs = 11
 batch_size = 32
 passes = 10
-save_acc_threshold = 0.75
-models_path = "models/acc75/"
+save_acc_threshold = 0.70
+models_path = "models/acc70/"
 
 # utils.set_random_seed(4)
 datasets_path = "data/datasets/LRClassification/"
-datasets_directories = [f"F{i}/ML1/" for i in range(1, 5)]
+datasets_directories = [f"F{i}/ML1/" for i in [1, 2, 3]]
 my_models = {name: None for name in datasets_directories}
 print(datasets_directories)
-
 
 def testing(model, test_dict, actions, results_dict):
     for dataset_file, test_data in test_dict.items():
@@ -69,8 +68,6 @@ for index in range(1, passes+1):
 
         with open(f"temp_results/results{index}.json", 'w') as f:
             json.dump(test_results, f, sort_keys=True, indent=4)
-
-        
 
 
 # models.save_model(model1, "models/F1_model.keras")
