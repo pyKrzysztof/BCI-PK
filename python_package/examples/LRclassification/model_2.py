@@ -44,7 +44,7 @@ model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy']
 model.summary()
 
 path = "models/base/"
-filename = "32_128_model_2"
+filename = "model_2"
 os.makedirs(path, exist_ok=True)
 
 # utils.plot_model(model, os.path.join(path, filename + ".png"), show_shapes=True)

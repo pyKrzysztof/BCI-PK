@@ -70,9 +70,11 @@ def prediction_function_1(data):
 config = mybci.get_base_config()
 
 config['name'] = "LRClassification"
-config['session_file'] = ['data/session/0406_1.csv', 'data/session/0406_2.csv', 'data/session/2805.csv']
+#config['session_file'] = ['data/session/0406_1.csv', 'data/session/0406_2.csv', 'data/session/2805.csv', 'data/session/1806_1.csv', 'data/session/1806_2.csv', 'data/session/1806_3.csv', 'data/session/1806_4.csv', 'data/session/1806_5.csv']
+config['session_file'] = ['data/session/1806_1.csv', 'data/session/1806_2.csv', 'data/session/1806_3.csv', 'data/session/1806_4.csv', 'data/session/1806_5.csv']
+
 config['action_markers'] = [1, 2]
-config['filter_func'] = {'F1': filter_func_1, 'F2': filter_func_2, 'F3': filter_func_3, 'F4': filter_func_4}
+config['filter_func'] = {'F1': filter_func_1, 'F2': filter_func_2, 'F3': filter_func_3} #, 'F4': filter_func_4}
 config['ml_prepare_func'] = {'ML1': ml_prep}
 config['save_training_dataset'] = True
 config['keep_seperate_training_data'] = False
