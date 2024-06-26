@@ -19,7 +19,10 @@ def filter_func_1(data, params):
 
 def ml_prep(data, params):
     temp_data = []
-    data_t = np.array(data.to_numpy().transpose(), order="C")
+    # print(data.columns)
+    local_data = data[[3, 4, 5, 6]]
+    data_t = np.array(local_data.to_numpy().transpose(), order="C")
+    # print(data_t.shape)
     for channel_data in data_t:
         fft_data = DataFilter.get_psd_welch(channel_data, 128, 128 // 2, 250, WindowOperations.BLACKMAN_HARRIS)
         lim = min(32, len(fft_data[0]))
@@ -27,26 +30,22 @@ def ml_prep(data, params):
         temp_data.append(values)
 
     fft = pd.DataFrame(np.array(temp_data))
-    return {"timeseries": data[-32:], "fftdata": fft}
+    return {"timeseries": local_data[-32:], "fftdata": fft}
 
 config = mybci.get_base_config()
 
 config['name'] = "LRClassification2"
-config['session_file'] = ['data/session/0406_1.csv', 'data/session/0406_2.csv', 'data/session/2805.csv', 'data/session/1806_1.csv', 'data/session/1806_2.csv', 'data/session/1806_3.csv', 'data/session/1806_4.csv', 'data/session/1806_5.csv']
-# config['session_file'] = ['data/session/1806_1.csv', 'data/session/1806_2.csv', 'data/session/1806_3.csv', 'data/session/1806_4.csv', 'data/session/1806_5.csv']
-
+config['session_file'] = []
+config['session_file'].extend([f'data/session/0406_{i}.csv' for i in [1, 2]])
+config['session_file'].extend([f'data/session/1806_{i}.csv' for i in range(1, 6)])
+config['session_file'].extend([f'data/session/2006_{i}.csv' for i in range(1, 6)])
 config['action_markers'] = [1, 2]
 config['filter_func'] = {'F1': filter_func_1} #, 'F4': filter_func_4}
 config['ml_prepare_func'] = {'ML1': ml_prep}
 config['save_training_dataset'] = True
 config['keep_seperate_training_data'] = False
 config['output_path_training_dataset'] = "data/datasets/"
-# config['use_board_device'] = True
-# config['prediction_functions'] = {"pf1": prediction_function_1}
-# processor.update()
-
 
 processor = mybci.DataProcessor(config)
 processor.process()
-
 print("Complete.")

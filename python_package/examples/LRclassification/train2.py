@@ -9,12 +9,12 @@ import json
 
 
 # params
-epochs = 11
+epochs = 7
 batch_size = 32
-passes = 10
+passes = 5
 save_acc_threshold = 0.0
 
-model_paths = [f"models/base/model_{i}.keras" for i in [2, 3, 4]]
+model_paths = [f"models/base/model_{i}_4.keras" for i in [2]]
 
 # utils.set_random_seed(4)
 datasets_path = "data/datasets/LRClassification2/"
@@ -65,5 +65,7 @@ for index in range(1, passes+1):
             print(f"Pass # {index}")
             pprint.pprint(test_results)
 
-        with open(f"temp_results/models234_11epochs_somedata_test_1806_5/results{index}{os.path.basename(model_path)}.json", 'w') as f:
+        path = f"temp_results/models234_{epochs}epochs_teston_2006_5/"
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, f'results{index}.json'), 'w') as f:
             json.dump(test_results, f, sort_keys=True, indent=2)
