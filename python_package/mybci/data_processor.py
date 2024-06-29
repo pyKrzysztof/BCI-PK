@@ -304,7 +304,7 @@ class DataProcessor:
 
             for func in self.params['ml_prepare_func']:
                 data = self._iterate_chunk(chunk, self.params['ml_prepare_func'][func])
-                path = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
+                path = os.path.join(self.params['output_path_training_data'], filter+'_'+func+'/')
                 os.makedirs(path, exist_ok=True)
                 # print(path)
                 for idx, ml_packet in enumerate(data):
@@ -338,16 +338,16 @@ class DataProcessor:
     def create_training_sets(self, filename):
         for filter in self.params['filter_func'].keys():
             for func in self.params['ml_prepare_func'].keys():
-                input_dir = os.path.join(self.params['output_path_training_data'], filter+'/', func+'/')
+                input_dir = os.path.join(self.params['output_path_training_data'], filter+'_'+func+'/')
                 # print(input_dir)
                 data = create_training_data(input_dir, self.params['action_markers'], {}, self.params['sep'])
-                path = os.path.join(self.params['output_path_training_dataset'], filter+'/', func+'/')
+                path = os.path.join(self.params['output_path_training_dataset'], filter+'_'+func+'/')
                 os.makedirs(path, exist_ok=True)
                 output_file = os.path.join(path, f"{self.params['name']}_{filename}_{filter}_{func}.pickle")
                 with open(output_file, 'wb') as f:
                     pickle.dump(data, f)
 
             if not self.params['keep_seperate_training_data']:
-                shutil.rmtree(os.path.join(self.params['output_path_training_data'], filter+'/'))
+                shutil.rmtree(os.path.join(self.params['output_path_training_data'], filter+'_'+func+'/'))
 
         return 0

@@ -34,7 +34,6 @@ def testing(model, test_dict, actions, results_dict):
             if temp_results['accuracy'] < save_acc_threshold:
                 print(f"Skipping {dataset_dir} based on low accuracy on {dataset_file} action {i}\n\n\n")
                 return False
-
     return True
 
 def train_model(model_path, train_data):
