@@ -61,8 +61,7 @@ def prep1(data, params):
         values = fft_data[0][0:lim].tolist()
         temp_data.append(values)
 
-    fft = pd.DataFrame(np.array(temp_data))
-    return {"timeseries": data[-32:], "fftdata": fft}
+    return {"timeseries": data[-32:], "fftdata": pd.DataFrame(np.array(temp_data))}
 
 def prep2(data, params):
     temp_data = []
@@ -75,5 +74,4 @@ def prep2(data, params):
         values = fft_data[0][0:lim].tolist()
         temp_data.append(values)
 
-    fft = pd.DataFrame(np.array(temp_data))
-    return {"timeseries": data[[[3, 4, 5, 6]]][-32:], "fftdata": fft}
+    return {"timeseries": data.iloc[-32:, [3, 4, 5, 6]], "fftdata": pd.DataFrame(np.array(temp_data))}

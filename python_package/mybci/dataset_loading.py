@@ -1,8 +1,8 @@
 import os
 import pickle
 import random
+import numpy as np
 
-seed = None
 
 
 def load_single_dataset(filepath):
@@ -21,7 +21,7 @@ def load_single_dataset(filepath):
 
 
 
-def load_all_datasets(directory_path):
+def load_all_datasets(directory_path, exclude_matching=None, load_excluded=False, verbose=False):
     """
     Loads training data from all pickle files in a directory.
 
@@ -30,12 +30,25 @@ def load_all_datasets(directory_path):
 
     Returns:
         - A dictionary with group labels as keys and lists of data entries as values.
+        - if 'load_excluded' is set to True it will also return a tuple containing excluded datasets.
     """
     all_data = {}
-
+    excluded_filenames = []
     # Load all pickle files in the specified directory
     for filename in os.listdir(directory_path):
         if filename.endswith('.pickle'):
+            if exclude_matching is not None:
+                if isinstance(exclude_matching, list) or isinstance(exclude_matching, tuple):
+                    if sum([match in filename for match in exclude_matching]) > 0:
+                        excluded_filenames.append(filename)
+                        print("Excluded:", filename)
+                        continue
+                elif exclude_matching in filename:
+                    excluded_filenames.append(filename)
+                    if verbose:
+                        print("Excluded:", filename)
+                    continue
+
             filepath = os.path.join(directory_path, filename)
             with open(filepath, 'rb') as f:
                 data = pickle.load(f)
@@ -43,63 +56,37 @@ def load_all_datasets(directory_path):
                     if label not in all_data:
                         all_data[label] = []
                     all_data[label].extend(group_data)
-
+            if verbose:
+                print("Loaded:", filename)
+    
+    if load_excluded:
+        return all_data, {name: load_single_dataset(os.path.join(directory_path, name)) for name in excluded_filenames}
     return all_data
 
-def shuffle_and_split_group(group_data, split):
-    """
-    Shuffles and splits a single group's data into training and test sets.
 
-    Parameters:
-        - group_data (list): List of data entries for the group.
-        - split (float): Split factor from 0.0 to 1.0, the number represents the % of data to be test data.
 
-    Returns:
-        - A tuple (train_data, test_data) for the group.
-    """
+def create_training_and_validation_datasets(data, xlabels:list, label_func:any, split=0.0, seed=None):
     if seed is not None:
-        random.Random(seed).shuffle(group_data)
+        rd = random.Random(seed)
     else:
-        random.shuffle(group_data)
-    split_index = int(len(group_data) * split)
-    return group_data[split_index:], group_data[:split_index]
+        rd = random
 
-def load_and_split_data(path, split, load_all=True) :
-    """
-    Loads training data from .pickle files in a directory or a single file, shuffles the data, and splits into train and test data.
+    train_dataset = []
+    validation_dataset = []
 
-    Parameters:
-        - path (str): Path to the directory or single file.
-        - split (float): Split factor from 0.0 to 1.0, the number represents the % of data to be test data.
-        - load_all (bool): If True, load all datasets from the directory; if False, load a single dataset file.
+    for group_label, group_data in data.items():
+        temp = group_data
+        rd.shuffle(temp)
+        split_index = int(len(group_data) * split)
+        train_dataset.extend(group_data[split_index:])
+        validation_dataset.extend(group_data[:split_index])
 
-    Returns:
-        - A tuple (train_data, test_data) where train_data is a list of dictionaries and test_data is a dictionary with group labels as keys and lists of data entries as values.
-    """
-    files = []
-    if load_all:
-        # data = load_all_datasets(path)
-        for filename in os.listdir(path):
-            if filename.endswith('.pickle'):
-                files.append(os.path.join(path, filename))
+    rd.shuffle(train_dataset)
+    rd.shuffle(validation_dataset)
 
-    else:
-        files = [path, ]
+    return ( [np.array([data[datatype] for data in train_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in train_dataset]]) ), \
+            ( [np.array([data[datatype] for data in validation_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in validation_dataset]]) )
 
-    train_data = []
-    test_data = {}
 
-    for file in files:
-        data = load_single_dataset(file)
-        test_data[os.path.basename(file)] = {label: [] for label in data.keys()}
-        for group_label, group_data in data.items():
-            group_train_data, group_test_data = shuffle_and_split_group(group_data, split)
-            train_data.extend(group_train_data)
-            test_data[os.path.basename(file)][group_label].extend(group_test_data)
-
-    if seed is not None:
-        random.Random(seed).shuffle(train_data)
-    else:
-        random.shuffle(train_data)
-
-    return train_data, test_data
+def dataset_to_x_y(dataset, xlabels:list, label_func:any):
+    return ( [np.array([data[datatype] for data in dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in dataset]]) )

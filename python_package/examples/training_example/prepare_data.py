@@ -7,6 +7,7 @@ config['name'] = "processed_data"
 config['action_markers'] = [1, 2]
 
 config['session_file'] = []
+config['session_file'].extend(['data/session/session_data/2805.csv'])
 config['session_file'].extend([f'data/session_data/0406_{i}.csv' for i in [1, 2]])
 config['session_file'].extend([f'data/session_data/1806_{i}.csv' for i in range(1, 6)])
 config['session_file'].extend([f'data/session_data/2006_{i}.csv' for i in range(1, 6)])
