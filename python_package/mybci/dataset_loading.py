@@ -88,5 +88,11 @@ def create_training_and_validation_datasets(data, xlabels:list, label_func:any, 
             ( [np.array([data[datatype] for data in validation_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in validation_dataset]]) )
 
 
-def dataset_to_x_y(dataset, xlabels:list, label_func:any):
+def dataset_to_x_y(dataset, xlabels:list, label_func:any, shuffle=False, seed=None):
+    if shuffle:
+        if seed is not None:
+            rd = random.Random(seed)
+        else:
+            rd = random
+        rd.shuffle(dataset)
     return ( [np.array([data[datatype] for data in dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in dataset]]) )
