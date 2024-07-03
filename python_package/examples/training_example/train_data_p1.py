@@ -8,9 +8,33 @@ from keras import models, layers, utils
 
 import mybci
 
+# seed = 2, unbiased, train_valid_split = 0.01
+# best results so far for calib_split = 0.2: epochs 5 / 3,  
+# best results so far for calib_split = 0.2: epochs 4 / 5, 
+# calib_split = 0.15: epochs 2 / 3
+
+# seed = 2, biased LR 1.0 / 1.10,  train_valid_split = 0.2
+# calib_split = 0.15 (30 seconds): epochs 3 / 3
+
+# those are best for now, those parameters do need fine tunning for new data, so need an algorithm to automatically set them later:
+# epochs = 1
+# epochs_calib = 3
+# batch_size = 64
+# batch_size_calib = 16
+# train_valid_split = 0.2
+# calib_split = 0.15
+# bias_left = 1.0
+# bias_right = 1.0
+
 # params
-epochs = 5
+epochs = 1
+epochs_calib = 3
 batch_size = 64
+batch_size_calib = 16
+train_valid_split = 0.2
+calib_split = 0.15
+bias_left = 1.0
+bias_right = 1.0
 
 # determinism
 dataset_seed = 2
@@ -50,8 +74,8 @@ def my_evaluate(X, Y, model):
         additive_result = np.array([0, 0], dtype=np.float64)
 
         for i, y, result in zip(indices, ys, results):
-            additive_result += result*[1.1, 1.]
-            sum_result += sum(result*[1.1, -1.])
+            additive_result += result*[bias_left, bias_right]
+            sum_result += sum(result*[bias_left, -bias_right])
             if sum_result > 0:
                 count_pos += 1
             else:
@@ -82,11 +106,11 @@ def my_evaluate(X, Y, model):
 for dataset_path in [os.path.join(datasets_path, subdir) for subdir in datasets_directories]:
     
     train_data, excluded_datasets = mybci.dataset_loading.load_all_datasets(dataset_path, exclude_matching=exclude_names, load_excluded=True, verbose=True)
-    (x_train, y_train), (x_valid, y_valid) = mybci.dataset_loading.create_training_and_validation_datasets(
+    (x_train, y_train), (x_valid, y_valid) = mybci.dataset_loading.split_dataset_to_xy(
         train_data, 
         xlabels=["fftdata", "timeseries"], 
         label_func=label_function, 
-        split=0.2,
+        split=train_valid_split,
         seed=dataset_seed
     )
 
@@ -97,14 +121,47 @@ for dataset_path in [os.path.join(datasets_path, subdir) for subdir in datasets_
     for name, dataset in excluded_datasets.items():
         if "2006_5" not in name:
             continue
-        
-        # test for predicting LEFT
-        x_test, y_test = mybci.dataset_loading.dataset_to_x_y(dataset[1], ["fftdata", "timeseries"], label_function)
-        model.evaluate(x_test, y_test)
-        my_evaluate(x_test, y_test, model)
 
+        (x_left, y_left), (x_test_left, y_test_left) = mybci.dataset_loading.split_dataset_to_xy(
+            dataset[1],
+            grouped=False,
+            xlabels=["fftdata", "timeseries"],
+            label_func=label_function,
+            split=1.0 - calib_split,
+            seed=dataset_seed
+        )
+    
+        (x_right, y_right), (x_test_right, y_test_right) = mybci.dataset_loading.split_dataset_to_xy(
+            dataset[2],
+            grouped=False,
+            xlabels=["fftdata", "timeseries"],
+            label_func=label_function,
+            split=1.0 - calib_split,
+            seed=dataset_seed
+        )
+
+        # test for predicting LEFT
+        print("Evaluating LEFT actions before calibration")
+        model.evaluate(x_test_left, y_test_left)
+        my_evaluate(x_test_left, y_test_left, model)
 
         # test for predicting RIGHT
-        x_test, y_test = mybci.dataset_loading.dataset_to_x_y(dataset[2], ["fftdata", "timeseries"], label_function)
-        model.evaluate(x_test, y_test)
-        my_evaluate(x_test, y_test, model)
+        print("Evaluating RIGHT actions before calibration")
+        model.evaluate(x_test_right, y_test_right)
+        my_evaluate(x_test_right, y_test_right, model)
+
+
+        (x, y) = mybci.dataset_loading.combine_xy_datasets( (x_left, y_left), (x_right, y_right), shuffle=True, seed=dataset_seed)
+        print(f"Calibrating on {len(y)} samples. Time to collect calibration data: {len(y)*32/255:.2f} seconds.")
+
+        model.fit(x, y, batch_size=batch_size_calib, epochs=epochs_calib)
+
+        # test for predicting LEFT
+        print("Evaluating LEFT actions")
+        model.evaluate(x_test_left, y_test_left)
+        my_evaluate(x_test_left, y_test_left, model)
+
+        # test for predicting RIGHT
+        print("Evaluating RIGHT actions")
+        model.evaluate(x_test_right, y_test_right)
+        my_evaluate(x_test_right, y_test_right, model)
