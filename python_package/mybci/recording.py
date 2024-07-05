@@ -1,45 +1,16 @@
-import time
-import argparse
-import datetime
-import queue
-import threading
-from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds, BrainFlowPresets
-from numpysocket import NumpySocket
-import scipy.signal as signal
-import random
-from typing import Callable, List
-import json
-import importlib
 import sys
+import json
+import time
+import queue
+import random
+import datetime
+import importlib
+import threading
 
-# Function being executed with each action in a new thread. 
-# A marker (action) is inserted as this function starts and when it returns (-action).
-# This feature is now used with pipeline callbacks, see 'simple_pipeline.json' and 'comm_over_serial.py'
-# def sample_action_function(action):
-    # time.sleep(random.uniform(4, 6))
+from typing import Callable, List
+from numpysocket import NumpySocket
+from brainflow import BrainFlowInputParams, BoardShim, BoardIds, BrainFlowPresets
 
-
-# Constants and session setup
-session_start_time = datetime.datetime.now().strftime("%d-%m-%Y-%H%M%S")
-ELECTRODES = 8
-BOARD = BoardIds.CYTON_BOARD
-SAMPLING_RATE = BoardShim.get_sampling_rate(BOARD.value)
-PACKET_SIZE = 50
-FILTER_NOTCH_FREQ = 50
-FILTER_FACTOR = 30
-BASE_THINKPULSE_CONFIG_GAIN_8 = [f"x{i+1}040010X" for i in range(ELECTRODES)]
-
-# Create a queue to hold data between threads
-data_queue = queue.Queue()
-
-# Create server stop event
-stop_event = threading.Event()
-
-# Load pipeline parameters from JSON
-def load_pipeline_parameters(json_filename: str):
-    with open(json_filename, "r") as json_file:
-        data = json.load(json_file)
-        return data
 
 # Represents a timetable entry with a random time delta and a specific action
 class TimetableEntry:
@@ -137,57 +108,29 @@ class PipelineProcessor:
         self.marker_insert_function = func
 
 
-# Function to send data from the queue in a separate thread
-def server_thread(args, connection: NumpySocket, server_stop_event):
-    # Create filter parameters
-    if args.filter:
-        b, a = signal.iirnotch(FILTER_NOTCH_FREQ, FILTER_FACTOR, fs=SAMPLING_RATE)
+# Load pipeline parameters from JSON
+def load_pipeline_parameters(json_filename: str):
+    with open(json_filename, "r") as json_file:
+        data = json.load(json_file)
+        return data
 
-    packet_count = 1
-    try:
-        while not server_stop_event.is_set() or not data_queue.empty():  # Check if the event is set and queue is not empty.
-            try:
-                # Get data from the queue to send (with a timeout to prevent indefinite blocking)
-                data, epoch_start = data_queue.get(timeout=0.5)  # Adjust timeout as needed
-                
-                if args.filter:
-                    for i in range(ELECTRODES):
-                        data[i] = signal.lfilter(b, a, data[i])
+def record_data(board_id, port, packet_size, session_timeout=3600, pipeline="", output_name="", electrode_config=None, simulated=False, server=False):
 
-                data[-1] = [timestamp - epoch_start for timestamp in data[-1]]
-                
-                # print(f"N: {packet_count}, Sending packets of shape: {data.shape}")
-                connection.sendall(data)  # Send the data to the client
-                packet_count = packet_count + 1
-            except queue.Empty:
-                continue  # If queue is empty, keep checking until signaled to stop
+    # stop event and a data queue for server side.
+    # start the server.
+    if server:
+        stop_event = threading.Event()
+        data_queue = queue.Queue()
+        start_server()
+        
 
-    # Handle exceptions due to a closed socket.
-    except Exception as e:
-        print("Server crashed.")
-        if not args.nostreamer:
-            print("Session will continue as there's an active backup streamer.")
-        else:
-            server_stop_event.set()
-            print("Session won't continue as there is no active backup streamer. Consider adding '-streamer' as a parameter.")
-    finally:
-        # 2 Disables a Socket for both sending and receiving. This field is constant.
-        # 1 Disables a Socket for sending. This field is constant.
-        # 0 Disables a Socket for receiving. This field is constant.
-        try:
-            connection.shutdown(2)
-        except:
-            pass
-        finally:
-            connection.close()
-
-# Function to gather data in the main thread
-def gather_data(args):
+    # save the start time
+    session_start_time = datetime.datetime.now().strftime("%d-%m-%Y-%H%M")
     
     # Set up board parameters
     params = BrainFlowInputParams()
-    params.serial_port = args.device_port
-    board = BoardShim(BOARD.value if not args.simulated else BoardIds.SYNTHETIC_BOARD.value, params)
+    params.serial_port = port
+    board = BoardShim(board_id if not simulated else BoardIds.SYNTHETIC_BOARD.value, params)
 
     # Set up board channel info
     package_num_channel = BoardShim.get_package_num_channel(board.board_id)
@@ -204,9 +147,9 @@ def gather_data(args):
     
     # Prepare pipeline (if provided)
     try:
-        if args.pipeline:
+        if pipeline:
             # Load pipeline parameters from a JSON configuration file
-            pipeline_parameters = load_pipeline_parameters(args.pipeline)
+            pipeline_parameters = load_pipeline_parameters(pipeline)
 
             # Extract parameters from JSON data
             actions = pipeline_parameters["actions"]
@@ -240,44 +183,48 @@ def gather_data(args):
             processor.on_exit_callback = lambda: close_func_handle(init_params)
 
     except Exception as e:
+        raise
         print(e)
         print("Pipeline error. Exitting.")
         sys.exit()
 
     # Set up board and config
     board.prepare_session()
-    if not args.simulated and args.config:
-        for conf in BASE_THINKPULSE_CONFIG_GAIN_8:
+    if not simulated and electrode_config:
+        for conf in electrode_config:
             print(board.config_board(conf))
             time.sleep(0.25)
 
     # Add the streamer output
-    pipeline_name = args.pipeline[:-5] if args.pipeline != "" else "raw_data"
-    name = f"file://{pipeline_name}_{session_start_time}.csv:w"
+    pipeline_name = pipeline[:-5] if pipeline != "" else "raw_data"
+    file_name = f"{pipeline_name}_{session_start_time}.csv" if output_name == "" else output_name
+    name = f"file://{file_name}:w"
     board.add_streamer(name, preset=BrainFlowPresets.DEFAULT_PRESET)
 
     # Start the stream
     board.start_stream()
     epoch_start = time.time()
     start_time = datetime.datetime.now()
-    end_time = start_time + datetime.timedelta(seconds=args.time)
+    end_time = start_time + datetime.timedelta(seconds=session_timeout)
     previous_buffer_count = 0
     pipeline_end_flag = False
     packet_n = 0
     # Main loop
-    while not stop_event.is_set():
+    condition = not stop_event.is_set() if server else True
+    while condition:
         now = datetime.datetime.now()
         buffer_count = board.get_board_data_count()
 
         # Get the latest data from the board
-        if buffer_count >= PACKET_SIZE:
+        if buffer_count >= packet_size:
             packet_n = packet_n + buffer_count
             packets = board.get_board_data()
-            data = packets[send_channels]
-            data_queue.put((data, epoch_start))
+            if server:
+                data = packets[send_channels]
+                data_queue.put((data, epoch_start))
             # End the session one packet_size after pipeline ended (to not miss the last marker)
             if pipeline_end_flag:
-                print("Finished the pipeline. ", packet_n)
+                print("Finished the pipeline with", packet_n, "data packets.")
                 processor.on_exit_callback()
                 break
 
@@ -287,32 +234,72 @@ def gather_data(args):
         
         previous_buffer_count = buffer_count
         
-        if args.pipeline:
+        if pipeline:
             # Process the pipeline (if present)
             pipeline_end_flag = processor.process_pipeline(now)
 
         else:
             # End the session after a certain time if specified.
             if datetime.datetime.now() > end_time:
-                if (args.time > 0):
+                if (session_timeout > 0):
                     break
                 pass
 
     board.stop_stream()
     board.release_session()
-    return name
+    return file_name
 
-# Function to start the server and run it's operation in a new thread after establishing connection
-def start_server(parsed_args):
+
+
+
+
+
+
+
+
+
+
+# Function to send data from the queue in a separate thread
+def server_thread(data_queue, connection: NumpySocket, server_stop_event):
+    # Create filter parameters
+    packet_count = 1
+    try:
+        while not server_stop_event.is_set() or not data_queue.empty():  # Check if the event is set and queue is not empty.
+            try:
+                # Get data from the queue to send (with a timeout to prevent indefinite blocking)
+                data, epoch_start = data_queue.get(timeout=0.5)  # Adjust timeout as needed
+
+                data[-1] = [timestamp - epoch_start for timestamp in data[-1]]
+            
+                # print(f"N: {packet_count}, Sending packets of shape: {data.shape}")
+                connection.sendall(data)  # Send the data to the client
+                packet_count = packet_count + 1
+            except queue.Empty:
+                continue  # If queue is empty, keep checking until signaled to stop
+    # Handle exceptions due to a closed socket.
+    except Exception as e:
+        server_stop_event.set()
+    finally:
+        # 2 Disables a Socket for both sending and receiving. This field is constant.
+        # 1 Disables a Socket for sending. This field is constant.
+        # 0 Disables a Socket for receiving. This field is constant.
+        try:
+            connection.shutdown(2)
+        except:
+            pass
+        finally:
+            connection.close()
+
+
+def start_server(ip, port, stop_event, data_queue, force_port=False):
     server_socket = NumpySocket()
-    port = parsed_args.port
     connected = False
     while True:
         try:
-            server_socket.bind((parsed_args.ip, port))
+            server_socket.bind((ip, port))
             connected = True
         except:
-            if not parsed_args.force_port:
+            if not force_port:
                 port = port - 1
             pass
         if connected:
@@ -323,47 +310,8 @@ def start_server(parsed_args):
     print(f"Waiting for connection on port {port}...")
     connection, address = server_socket.accept()
     print("Client connected:", address)
-    server_thread_instance = threading.Thread(target=server_thread, args=(parsed_args, connection, stop_event, ))
+    server_thread_instance = threading.Thread(target=server_thread, args=(data_queue, connection, stop_event, ))
     server_thread_instance.start()
 
     return server_socket, server_thread_instance
-
-
-
-def main():
-    # Parser setup
-    parser = argparse.ArgumentParser("threaded_gathering_socket")
-    parser.add_argument("--ip", type=str, default="localhost", required=False)
-    parser.add_argument("--port", type=int, default=9999, required=False)
-    parser.add_argument("--device_port", type=str, default="/dev/ttyUSB0", required=False)
-    parser.add_argument("--time", type=int, default=0, required=False, help="Time of the simulation, will run indefinitely if not provided or as long as it needs when --pipeline is passed.")
-    parser.add_argument("--pipeline", type=str, default="", required=False, help="Pass a .json file with pipeline configuration to process the pipeline, overwrites --time parameter.")
-    parser.add_argument("-nostreamer", action="store_true", help="Prevents the streaming of board data into a .csv file with current date and time as the filename.")
-    parser.add_argument("-filter", action="store_true", help="Enables a notch filter at 50Hz")
-    parser.add_argument("-simulated", action="store_true", help="Simulates a board if no physical connection is present.")
-    parser.add_argument("-server", action="store_true", help="Runs the socket server.")
-    parser.add_argument("-markers", action="store_true", help="Decides if the marker channel will be passed as second to last row of data over the socket.")
-    parser.add_argument("-config", action="store_true", help="Send active electrode config.")
-    parser.add_argument("-force_port", action="store_true", required=False, default=False)
-    args = parser.parse_args()
-    print("Running a session with:", args)
-    
-    # Set up the server socket and start the server thread
-    if args.server:
-        server_socket, server_thread_instance = start_server(args)
-
-    # Run the data-gathering function in the main thread
-    try:
-        gather_data(args)
-    except Exception as e:
-        raise e
-    finally:
-        if args.server:
-            stop_event.set()
-            server_socket.close()  # Close the server when done
-            server_thread_instance.join()  # Wait for the server thread to complete
-
-
-if __name__ == "__main__":
-    main()
 

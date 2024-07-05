@@ -1,0 +1,9 @@
+{
+    "actions": ["L", "R"],
+    "time_between_actions_min": 1,
+    "time_between_actions_max": 1,
+    "n_samples": 2,
+    "call_on_enter": "pipelines.pipeline_calib_20.init",
+    "call_on_action": "pipelines.pipeline_calib_20.play",
+    "call_on_exit": "pipelines.pipeline_calib_20.close"
+}

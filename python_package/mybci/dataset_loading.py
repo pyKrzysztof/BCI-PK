@@ -81,6 +81,7 @@ def split_dataset_to_xy(data, xlabels:list, label_func:any, grouped=True, split=
 
     train_dataset = []
     validation_dataset = []
+
     if grouped:
         for group_label, group_data in data.items():
             temp = group_data

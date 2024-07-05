@@ -27,7 +27,7 @@ import mybci
 # bias_right = 1.0
 
 # params
-epochs = 1
+epochs = 3
 epochs_calib = 3
 batch_size = 64
 batch_size_calib = 16
@@ -59,7 +59,6 @@ output = layers.Dense(2, activation='sigmoid')(dense)
 datasets_path = "data/datasets/processed_data/"
 datasets_directories = [f"f{i}_p1" for i in [1]]
 exclude_names = ["2004", "0406", "2006_5"]
-
 
 # functions
 label_function = lambda label: [1, 0] if label == 1 else [0, 1]
@@ -117,7 +116,7 @@ for dataset_path in [os.path.join(datasets_path, subdir) for subdir in datasets_
     model = models.Model(inputs=[input1, input2], outputs=output)
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, validation_data=(x_valid, y_valid))
-
+    model.save(f"models/model_18n20_06_{epochs}epoch.keras")
     for name, dataset in excluded_datasets.items():
         if "2006_5" not in name:
             continue
