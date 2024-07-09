@@ -251,11 +251,15 @@ class DataProcessor:
             source = self._open_board()
             live = True
             
-        return PacketReader(source, self.params['packet_size'], live, self.params['sep'])
+        return PacketReader(source, self.params['packet_size'], self.params['buffer_size'], live, self.params['sep'])
 
     def _open_board(self):
         params = BrainFlowInputParams()
-        board = BoardShim(BoardIds.SYNTHETIC_BOARD, params)
+        if self.params['synthetic']:
+            board = BoardShim(BoardIds.SYNTHETIC_BOARD, params)
+        else:
+            params.serial_port = params['board_device']
+            board = BoardShim(BoardIds.CYTON_BOARD.value, params)
         board.prepare_session()
         board.start_stream()
         return board
@@ -265,21 +269,23 @@ class DataProcessor:
         pass
 
     def _update_live(self, packet: np.ndarray, buffer: deque, name: str):
+        # print(len(buffer))
         if not packet.size:
             # handle timeouts here
             return 1
         
         if len(buffer) < self.params['ml_prepare_size']:
             return 1
-            
+        
         for filter_name, filter_func in self.params['filter_func'].items():
             filtered_packet = filter_func(np.array(buffer)[-self.params['filter_size']:], self.params)
             self.filtered_buffers[filter_name].extend(filtered_packet)
-            for func in self.params['ml_prepare_func']:
-                data = func(np.array(self.filtered_buffers[filter_name])[-self.params['ml_prepare_func']:], self.params)
-
-                for pname, pfunc in self.params['prediction_functions'].items():
-                    pfunc(data)
+            if len(self.filtered_buffers[filter_name]) < self.params['ml_prepare_size']:
+                continue
+            for func_name, func in self.params['ml_prepare_func'].items():
+                data = func(np.array(self.filtered_buffers[filter_name])[-self.params['ml_prepare_size']:], self.params)
+                for pfunc in self.params['prediction_functions']:
+                    pfunc(data, self.params)
 
 
     def _update_file(self, packet: np.ndarray, buffer: deque, name: str):

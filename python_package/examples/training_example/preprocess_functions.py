@@ -63,6 +63,19 @@ def prep1(data, params):
 
     return {"timeseries": data[-32:], "fftdata": pd.DataFrame(np.array(temp_data))}
 
+def prep1_live(data, params):
+    temp_data = []
+    # local_data = data#[[3, 4, 5, 6]]
+
+    data_t = np.array(data[:, params['channel_column_ids']].transpose(), order="C")
+    for channel_data in data_t:
+        fft_data = DataFilter.get_psd_welch(channel_data, 128, 128 // 2, 250, WindowOperations.BLACKMAN_HARRIS)
+        lim = min(32, len(fft_data[0]))
+        values = fft_data[0][0:lim].tolist()
+        temp_data.append(values)
+
+    return {"timeseries": data[-32:], "fftdata": pd.DataFrame(np.array(temp_data))}
+
 def prep2(data, params):
     temp_data = []
     # local_data = data

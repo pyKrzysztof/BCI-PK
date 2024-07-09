@@ -20,3 +20,12 @@ def custom_evaluate(X, Y, model: models.Model, batch_size, step, return_indexed=
             yield range(start, start + batch_size), batch_Y, outputs
         else:
             yield batch_Y, outputs
+
+
+def custom_predict(data, model, batch_size, step, buffer, buffer_size):
+    # TODO finish this, use buffers.
+
+    for start in range(0, buffer_size - batch_size + 1, step):
+        batch_X = [x[start:start + batch_size] for x in data]
+        reshaped_batch_X = [input.reshape(-1, *input.shape[1:], 1) for input in batch_X]
+        outputs = model([input for input in reshaped_batch_X]).numpy()
