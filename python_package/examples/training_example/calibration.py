@@ -44,4 +44,4 @@ train_data = mybci.dataset_loading.load_all_datasets(calib_dataset_path, verbose
 
 print(len(y_train))
 
-model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, validation_data=(x_valid, y_valid))
+# model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, validation_data=(x_valid, y_valid))

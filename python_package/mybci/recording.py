@@ -183,7 +183,6 @@ def record_data(board_id, port, packet_size, session_timeout=3600, pipeline="", 
             processor.on_exit_callback = lambda: close_func_handle(init_params)
 
     except Exception as e:
-        raise
         print(e)
         print("Pipeline error. Exitting.")
         sys.exit()

@@ -27,7 +27,7 @@ import mybci
 # bias_right = 1.0
 
 # params
-epochs = 3
+epochs = 4
 epochs_calib = 3
 batch_size = 64
 batch_size_calib = 16
@@ -37,8 +37,9 @@ bias_left = 1.0
 bias_right = 1.0
 
 # determinism
-dataset_seed = 2
-utils.set_random_seed(812)
+seed = 2
+dataset_seed = seed
+utils.set_random_seed(seed)
 tf.config.experimental.enable_op_determinism()
 
 # Define input and output layers
@@ -58,17 +59,19 @@ output = layers.Dense(2, activation='sigmoid')(dense)
 # dataset directories by filter/process functions.
 datasets_path = "data/datasets/processed_data/"
 datasets_directories = [f"f{i}_p1" for i in [1]]
-exclude_names = ["2004", "0406", "2006_5"]
+exclude_names = ["2004", "0406", "2006_5", "calib", "test"]
 
 # functions
 label_function = lambda label: [1, 0] if label == 1 else [0, 1]
+
+
 
 def my_evaluate(X, Y, model):
     count_pos = 0
     count_neg = 0
     add_count_1 = 0
     add_count_2 = 0
-    for indices, ys, results in mybci.training.custom_evaluate(X, Y, model, batch_size=4, step=4, return_indexed=True):
+    for indices, ys, results in mybci.training.custom_evaluate(X, Y, model, batch_size=1, step=1, return_indexed=True):
         sum_result = 0
         additive_result = np.array([0, 0], dtype=np.float64)
 
@@ -100,6 +103,8 @@ def my_evaluate(X, Y, model):
     print(f"Additive accuracy: {result:.2f}%")
 
 
+model = models.Model(inputs=[input1, input2], outputs=output)
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
 # execution
 for dataset_path in [os.path.join(datasets_path, subdir) for subdir in datasets_directories]:
@@ -113,54 +118,67 @@ for dataset_path in [os.path.join(datasets_path, subdir) for subdir in datasets_
         seed=dataset_seed
     )
 
-    model = models.Model(inputs=[input1, input2], outputs=output)
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, validation_data=(x_valid, y_valid))
-    model.save(f"models/model_18n20_06_{epochs}epoch.keras")
+    # model.save(f"models/model_18n20_06_{epochs}epoch{seed}seed.keras")
+
+    test_dataset = None
     for name, dataset in excluded_datasets.items():
-        if "2006_5" not in name:
+        if "calib" not in name:
             continue
-
-        (x_left, y_left), (x_test_left, y_test_left) = mybci.dataset_loading.split_dataset_to_xy(
-            dataset[1],
-            grouped=False,
-            xlabels=["fftdata", "timeseries"],
-            label_func=label_function,
-            split=1.0 - calib_split,
-            seed=dataset_seed
-        )
+        test_dataset = dataset
     
-        (x_right, y_right), (x_test_right, y_test_right) = mybci.dataset_loading.split_dataset_to_xy(
-            dataset[2],
-            grouped=False,
-            xlabels=["fftdata", "timeseries"],
-            label_func=label_function,
-            split=1.0 - calib_split,
-            seed=dataset_seed
-        )
+    calib_dataset = None
+    for name, dataset in excluded_datasets.items():
+        if "test" not in name:
+            continue
+        calib_dataset = dataset
 
-        # test for predicting LEFT
-        print("Evaluating LEFT actions before calibration")
-        model.evaluate(x_test_left, y_test_left)
-        my_evaluate(x_test_left, y_test_left, model)
+    (_, _), (x_test_left, y_test_left) = mybci.dataset_loading.split_dataset_to_xy(
+        test_dataset[1],
+        grouped=False,
+        xlabels=["fftdata", "timeseries"],
+        label_func=label_function,
+        split=1.0,
+        seed=dataset_seed
+    )
 
-        # test for predicting RIGHT
-        print("Evaluating RIGHT actions before calibration")
-        model.evaluate(x_test_right, y_test_right)
-        my_evaluate(x_test_right, y_test_right, model)
+    (_, _), (x_test_right, y_test_right) = mybci.dataset_loading.split_dataset_to_xy(
+        test_dataset[2],
+        grouped=False,
+        xlabels=["fftdata", "timeseries"],
+        label_func=label_function,
+        split=1.0,
+        seed=dataset_seed
+    )
+
+    # test for predicting LEFT
+    print("Evaluating LEFT actions before calibration")
+    model.evaluate(x_test_left, y_test_left)
+    # my_evaluate(x_test_left, y_test_left, model)
+
+    # test for predicting RIGHT
+    print("Evaluating RIGHT actions before calibration")
+    model.evaluate(x_test_right, y_test_right)
+    # my_evaluate(x_test_right, y_test_right, model)
 
 
-        (x, y) = mybci.dataset_loading.combine_xy_datasets( (x_left, y_left), (x_right, y_right), shuffle=True, seed=dataset_seed)
-        print(f"Calibrating on {len(y)} samples. Time to collect calibration data: {len(y)*32/255:.2f} seconds.")
+    (x, y), (x_valid, y_valid) = mybci.dataset_loading.split_dataset_to_xy(
+        calib_dataset,
+        xlabels=["fftdata", "timeseries"],
+        label_func=label_function,
+        split=0.8,
+        seed=seed
+    )
 
-        model.fit(x, y, batch_size=batch_size_calib, epochs=epochs_calib)
+    print(f"Calibrating on {len(y)} samples. Time to collect calibration data: {len(y)*32/255:.2f} seconds.")
+    model.fit(x, y, batch_size=batch_size_calib, epochs=epochs_calib, validation_data=(x_valid, y_valid))
 
-        # test for predicting LEFT
-        print("Evaluating LEFT actions")
-        model.evaluate(x_test_left, y_test_left)
-        my_evaluate(x_test_left, y_test_left, model)
+    # test for predicting LEFT
+    print("Evaluating LEFT actions")
+    model.evaluate(x_test_left, y_test_left)
+    # my_evaluate(x_test_left, y_test_left, model)
 
-        # test for predicting RIGHT
-        print("Evaluating RIGHT actions")
-        model.evaluate(x_test_right, y_test_right)
-        my_evaluate(x_test_right, y_test_right, model)
+    # test for predicting RIGHT
+    print("Evaluating RIGHT actions")
+    model.evaluate(x_test_right, y_test_right)
+    # my_evaluate(x_test_right, y_test_right, model)

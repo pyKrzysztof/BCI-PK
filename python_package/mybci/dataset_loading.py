@@ -133,6 +133,40 @@ def combine_xy_datasets(*datasets_xy, shuffle=True, seed=None):
     X_out = list([np.array(data) for data in dataset[:-1]])
     return (X_out, Y_out)
 
+
+def split_dataset(dataset, split, preshuffle=False, postshuffle=True, grouped=True, seed=None):
+    if seed is not None:
+        rd = random.Random(seed)
+    else:
+        rd = random
+
+    dataset_1 = {}
+    dataset_2 = {}
+    if grouped:
+        for group_label, group_data in dataset.items():
+            temp = group_data
+            if preshuffle:
+                rd.shuffle(temp)
+            split_index = int(len(group_data) * split)
+            dataset_1[group_label] = temp[split_index:]
+            dataset_2[group_label] = temp[:split_index]
+            if postshuffle:
+                rd.shuffle(dataset_1[group_label])
+                rd.shuffle(dataset_2[group_label])
+            assert group_data[split_index:] != dataset_1[group_label]
+            assert group_data[:split_index] != dataset_2[group_label]
+    else:
+        split_index = int(len(dataset) * split)
+        dataset_1.extend(dataset[split_index:])
+        dataset_2.extend(dataset[:split_index])
+
+    
+    return dataset_1, dataset_2
+
+
+
+
+
 def apply_func_to_dataset(dataset, func, feature_names):
     """ func will be passed data for provided feature_names and has to return the changed data in that order. """
     # not implemented yet
