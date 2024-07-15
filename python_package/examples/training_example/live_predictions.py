@@ -4,12 +4,12 @@ import mybci
 import pprint
 import pickle
 import random
+import collections
 import mybci.training
 import tensorflow as tf
 import numpy as np
 from keras import models, layers, utils
 from preprocess_functions import filter1, prep1_live # type: ignore (vs code won't resolve this import)
-
 # seed = 2, unbiased, train_valid_split = 0.01
 # best results so far for calib_split = 0.2: epochs 5 / 3,  
 # best results so far for calib_split = 0.2: epochs 4 / 5, 
@@ -194,15 +194,38 @@ def seeded_model():
 
 
 model = models.load_model("models/model_18n20_06_1epoch.keras")
-
 # model = seeded_model()
 
+results_buffer = collections.deque(maxlen=4)
+
+def buffer_predict(buffer):
+    count_L = 0
+    count_R = 0
+    summed = 0
+    for result in buffer:
+        print(result)
+        if result[0] > result[1]:
+            count_L += 1
+        else:
+            count_R += 1
+
+        summed += (result[0] - result[1])
+
+    print(count_L, count_R, summed)
+    return count_L, count_R, summed
+
+# TODO make it so that data from file processing and live processing is exactly the same format without intervening with processing/prediction functions.
+# (boils down to which columns are passed and returned, I have the columnids in config so should make use of that finally)
 def my_prediction(data, params):
+    # those 2 lines should not be necessary!!!
     X1 = np.array(data['fftdata'].to_numpy(), order="C").reshape(-1, 8, 32, 1)
     X2 = data['timeseries'][:, params['channel_column_ids']].reshape(-1, 32, 8, 1)
 
-    result = model([X1, X2]).numpy()
-    pass
+    result = model([X1, X2]).numpy()[0]
+    results_buffer.append(result)
+
+    count_L, count_R, summed = buffer_predict(results_buffer)
+
 
 config = mybci.get_base_config()
 config['use_board_device'] = True
@@ -210,14 +233,14 @@ config['board_device'] = "/dev/ttyUSB0"
 config['save_raw_session'] = True
 config['prediction_functions'] = [my_prediction, ]
 
+config['buffer_size'] = 128
 config['packet_size'] = 32
 config['filter_size'] = 64
 config['filter_func'] = {'f1': filter1, }
 config['ml_prepare_size'] = 128
 config['ml_prepare_func'] = {'p1': prep1_live, }
 
-config['buffer_size'] = 128
-
+config['synthetic'] = True 
 
 processor = mybci.DataProcessor(config)
 while True:
