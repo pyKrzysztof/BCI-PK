@@ -3,7 +3,7 @@
     "time_between_actions_min": 1,
     "time_between_actions_max": 1,
     "n_samples": 10,
-    "call_on_enter": "sound_player.init",
-    "call_on_action": "sound_player.play",
-    "call_on_exit": "sound_player.close"
+    "call_on_enter": "pipelines.pipeline_normal.init",
+    "call_on_action": "pipelines.pipeline_normal.play",
+    "call_on_exit": "pipelines.pipeline_normal.close"
 }
