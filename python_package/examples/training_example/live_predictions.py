@@ -230,6 +230,10 @@ def my_prediction(data, params):
 config = mybci.get_base_config()
 config['use_board_device'] = True
 config['board_device'] = "/dev/ttyUSB0"
+
+# https://docs.openbci.com/Cyton/CytonSDK/#channel-setting-commands
+config['electode_config'] = ['x1040010X', 'x2040010X', 'x3040010X', 'x4040010X', 'x5040010X', 'x6040010X', "x7040010X", "x8040010X"]
+
 config['save_raw_session'] = True
 config['prediction_functions'] = [my_prediction, ]
 
@@ -240,7 +244,7 @@ config['filter_func'] = {'f1': filter1, }
 config['ml_prepare_size'] = 128
 config['ml_prepare_func'] = {'p1': prep1_live, }
 
-config['synthetic'] = True 
+# config['synthetic'] = True 
 
 processor = mybci.DataProcessor(config)
 while True:

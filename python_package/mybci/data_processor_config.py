@@ -7,6 +7,7 @@ BASE_CONFIG = {
     # live board data config - not implemented yet.
     'board_device': '/dev/ttyUSB0', # board connection physical port.
     'use_board_device': False, # whether to use the board for processing (toggles live data processing / file data processing).
+    'electrode_config': [],
     'save_raw_session': True, # when in live data processing, toggles raw session data file saving.
     'live_pipeline': None, # when in live data processing mode, specifies (optionally) a pipeline for training, blocks live prediction.
     'prediction_functions': [], # functions that take current training packet data (output of ml_prepare_func)

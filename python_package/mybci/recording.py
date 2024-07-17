@@ -191,8 +191,7 @@ def record_data(board_id, port, packet_size, session_timeout=3600, pipeline="", 
     board.prepare_session()
     if not simulated and electrode_config:
         for conf in electrode_config:
-            print(board.config_board(conf))
-            time.sleep(0.25)
+            board.config_board(conf)
 
     # Add the streamer output
     pipeline_name = pipeline[:-5] if pipeline != "" else "raw_data"

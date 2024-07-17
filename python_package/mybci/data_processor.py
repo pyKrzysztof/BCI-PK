@@ -261,6 +261,9 @@ class DataProcessor:
             params.serial_port = params['board_device']
             board = BoardShim(BoardIds.CYTON_BOARD.value, params)
         board.prepare_session()
+        for conf in self.params['electrode_config']:
+            print("Sending", conf)
+            board.config_board(conf)
         board.start_stream()
         return board
 
