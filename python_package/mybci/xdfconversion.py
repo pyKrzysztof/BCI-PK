@@ -22,12 +22,12 @@ def almost_equal(a, b, tolerance):
 def base_marker_func_LRS(label):
     return 1 if label == "L" else 2 if label == "R" else 3 if label == "S" else 0
 
-def xdf_to_csv(filename, data_index, marker_index, marker_dict, timestamp_tolerance=0.01):
+def xdf_to_csv(filename, data_index, marker_index, marker_dict, timestamp_tolerance=0.01, output_file=None):
     """
     'data_index' and 'marker_index' are the stream indices of the <'filename'>.xdf file.\n
     'marker_dict' with values of the marker stream as keys and equivalent numerical values as corresponding values, eg. {'L': 1, 'R': 2}
     """
-    data = load_xdf(filename)
+    data = load_xdf(filename, print_header=False)
     marker_pairs = deque([(ts, marker_dict[marker[0]]) for ts, marker in stream_zip_by_index(data, marker_index) if marker[0] in marker_dict.keys()])
 
     action_duration = 4
@@ -36,7 +36,10 @@ def xdf_to_csv(filename, data_index, marker_index, marker_dict, timestamp_tolera
     count_marker = 0
     count_end_marker = 0
 
-    new_filename = filename.replace("xdf", "csv")
+    if output_file is not None:
+        new_filename = output_file
+    else:
+        new_filename = filename.replace("xdf", "csv")
 
     with open(new_filename, "w", newline="\n") as csvfile:
         writer = csv.writer(csvfile, delimiter="\t")

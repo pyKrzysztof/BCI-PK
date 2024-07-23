@@ -310,9 +310,9 @@ class DataProcessor:
                 os.makedirs(path, exist_ok=True)
                 chunk_name = f"{chunk['label']}_{chunk['counter']}.csv"
                 save_to_file(chunk['data'], path, chunk_name, self.params['sep'])
-
             for func in self.params['ml_prepare_func']:
                 data = self._iterate_chunk(chunk, self.params['ml_prepare_func'][func])
+
                 path = os.path.join(self.params['output_path_training_data'], filter+'_'+func+'/')
                 os.makedirs(path, exist_ok=True)
                 # print(path)

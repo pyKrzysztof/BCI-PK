@@ -3,7 +3,7 @@ import pickle
 import random
 import numpy as np
 
-
+import enum
 
 def shuffle_columns(data, seed=None):
     if seed is not None:
@@ -73,17 +73,21 @@ def load_all_datasets(directory_path, exclude_matching=None, load_excluded=False
         return all_data, {name: load_single_dataset(os.path.join(directory_path, name)) for name in excluded_filenames}
     return all_data
 
-def split_dataset_to_xy(data, xlabels:list, label_func:any, grouped=True, split=0.2, seed=None):
+def split_dataset_to_xy(data, xlabels:list, label_func:any, grouped=True, split=0.2, seed=None, excluded_groups=[]):
     if seed is not None:
         rd = random.Random(seed)
     else:
         rd = random
+
+    xlabels = [label.name for label in xlabels if isinstance(label, enum.Enum)]
 
     train_dataset = []
     validation_dataset = []
 
     if grouped:
         for group_label, group_data in data.items():
+            if group_label in excluded_groups:
+                continue
             temp = group_data
             rd.shuffle(temp)
             split_index = int(len(group_data) * split)
@@ -100,8 +104,13 @@ def split_dataset_to_xy(data, xlabels:list, label_func:any, grouped=True, split=
     if not label_func:
         label_func = lambda _: _
 
-    return ( [np.array([data[datatype] for data in train_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in train_dataset]]) ), \
-            ( [np.array([data[datatype] for data in validation_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in validation_dataset]]) )
+    if len(xlabels) != 1:
+        return ( [np.array([data[datatype] for data in train_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in train_dataset]]) ), \
+                ( [np.array([data[datatype] for data in validation_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in validation_dataset]]) )
+
+    return ( *[np.array([data[datatype] for data in train_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in train_dataset]]) ), \
+                    ( *[np.array([data[datatype] for data in validation_dataset]) for datatype in xlabels], np.array([label_func(label) for label in [data['label'] for data in validation_dataset]]) )
+
 
 def dataset_ungrouped_to_xy(dataset, xlabels:list, label_func:any, shuffle=False, seed=None):
     if shuffle:
