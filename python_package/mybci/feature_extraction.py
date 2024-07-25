@@ -4,6 +4,7 @@ import enum
 
 from brainflow import DataFilter, DetrendOperations, FilterTypes, WaveletTypes, WaveletDenoisingTypes, ThresholdTypes, WaveletExtensionTypes, NoiseEstimationLevelTypes, WindowOperations
 
+from mybci.data_processor import Config
 
 class Features(enum.IntEnum):
     """Enum to store all supported extraction features. """
@@ -29,12 +30,16 @@ class Filters(enum.Enum):
 
     def detrend(detrend_type=DetrendOperations.CONSTANT):
         return lambda channel_data: DataFilter.detrend(channel_data, detrend_type)
+    
+    BANDPASS = 1
+    BANDSTOP = 2
+    WAVELET_DENOISE = 3
 
 
 
-def data_filter(data: np.array, params: dict, filters:list = [], value_scale=1):
+def data_filter(data: np.array, config:Config, filters:list = [], value_scale=1):
     transposed = np.array(data.transpose(), order="C")
-    for channel in params['channel_column_ids']:
+    for channel in config.channel_column_ids:
         transposed[channel] = transposed[channel] * value_scale
         for handle in filters:
             handle(transposed[channel])
@@ -42,26 +47,29 @@ def data_filter(data: np.array, params: dict, filters:list = [], value_scale=1):
     return transposed.transpose()
 
 
-def extract_features(data: pd.DataFrame, params:dict, features: list[Features], custom_features:dict = {}, filters: list = [], value_scale=1, sampling=250):
+def extract_features(data: pd.DataFrame, config:Config, features: list[Features], custom_features:dict = {}, filters: list = [], value_scale=1, sampling=250):
     """Extracts target features from data channels. Can also apply filters beforehand and scale the raw values. 
     Using filters here makes sense if feature extraction size and filtering size is the same."""
 
-    transposed = np.array(data.to_numpy().transpose(), order="C")
+    transposed = np.array(data[config.channel_column_ids].to_numpy().transpose(), order="C")
 
     output_features = {feature.name: [] for feature in features}
-    
+    # print("TEST")
     for name in custom_features.keys():
         output_features[name] = []
 
     channels = range(len(transposed))
-    # channels = params['channel_column_ids']
     # print(channels)
+    # print(filters)
 
+    # print(transposed.shape)
+    # print(transposed.shape)
+    # print(config.channel_column_ids)
     for channel in channels:
         transposed[channel] = transposed[channel] * value_scale
-
-        for handle in [filter.value for filter in filters]:
+        for handle in filters:
             handle(transposed[channel])
+            # print("Changed shit!")
 
         if Features.FFT in features:
             output_features[Features.FFT.name].append(np.array(DataFilter.perform_fft(transposed[channel], WindowOperations.BLACKMAN_HARRIS)))
@@ -86,7 +94,7 @@ def extract_features(data: pd.DataFrame, params:dict, features: list[Features], 
 
     for name in output_features.keys():
         output_features[name] = pd.DataFrame(np.array(output_features[name]))
-
+    # print(output_features)
     return output_features
 
 

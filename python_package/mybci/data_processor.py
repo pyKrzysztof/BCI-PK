@@ -17,7 +17,7 @@ def save_to_file(data: pd.DataFrame, path, name, sep):
 
 
 # creates a training data set from training files. TODO Make a full documentation for this so there's no confusion.
-def create_training_data(input_dir, groups, func_dict={}, sep='\t'):
+def create_training_data(data_list, groups, func_dict={}, sep='\t'):
 
     """
     Creates training data from files in the input directory, applies given functions, and saves the result to a pickle file.
@@ -39,53 +39,38 @@ def create_training_data(input_dir, groups, func_dict={}, sep='\t'):
     # Dictionary to hold the grouped data
     grouped_data = {group: [] for group in groups}
     
-    # Iterate through files in the input directory
-    for filename in os.listdir(input_dir):
-        # Split the filename to extract idx1, idx2, idx3, and filetype
-        parts = filename.split('_')
-        if len(parts) < 4:
-            continue  # Skip files that do not match the expected pattern
-        
-        idx1 = int(parts[0])  # Label
-        idx2 = parts[1]  # Chunk index
-        idx3 = parts[2]  # Packet number
-        filetype = parts[3].split('.')[0]  # File type without the extension
+    for data_entry in data_list:
+        idx1 = int(data_entry[0])
+        idx2 = data_entry[1]
+        idx3 = data_entry[2]
+        feature = data_entry[3]
 
         # Check if the label is in the specified groups
         if idx1 not in groups:
             continue
-        
 
         # Read the file
-        filepath = os.path.join(input_dir, filename)
-        data = np.genfromtxt(filepath, delimiter=sep)
-        
-        # print(filename)
-        # print(data.shape)
+        data = data_entry[4]
 
         # Process the data using the corresponding function
-        if filetype in func_dict:
-            processed_data = func_dict[filetype](data)
-        else:
-            processed_data = data
+        #TODO implement this option, won't do for now because no use cases.
+        processed_data = data
 
         # Check if there's already an entry for this chunk
         existing_entry = next((entry for entry in grouped_data[idx1] if entry.get('chunk_index') == idx2 and entry.get('packet_number') == idx3), None)
         
         if existing_entry:
             # Update the existing entry with the new file type data
-            existing_entry[filetype] = processed_data
+            existing_entry[feature] = processed_data
         else:
             # Create a new entry
             new_entry = {
                 'label': idx1,
                 'chunk_index': idx2,
                 'packet_number': idx3,
-                filetype: processed_data
+                feature: processed_data
             }
             grouped_data[idx1].append(new_entry)
-
-    # print(grouped_data)
 
     return grouped_data
 
@@ -198,43 +183,97 @@ class ChunkHandler:
         return output
 
 
+from dataclasses import dataclass, field
+from typing import Callable, List, Optional
+
+
+@dataclass
+class Config:
+    """
+    Configuration class for setting parameters with descriptions and default values.
+
+    Attributes:
+        name (str): Name of the configuration.
+        action_markers (List[int]): List of action markers.
+        buffer_size (int): Size of the buffer, from which the data will be filtered.
+        packet_size (int): Size of the packets.
+        feature_size (int): Size of the feature.
+        chunk_offset (int): Offset for data chunking.
+        sampling_rate (int): Sampling rate of the data.
+        filter_function (Callable[[int], bool]): Function used for filtering data.
+        feature_function (Callable[[int], int]): Function used for feature extraction.
+        session_folders (List[str]): List of session folder paths.
+        excluded_session_files (List[str]): List of files to exclude from sessions.
+        dataset_directory (str): Directory path for datasets.
+        keep_helper_files (bool): Whether to keep helper files after processing.
+        live_board (BoardIDs): Identifier for the live board.
+        device_port (str): Port for the device connection.
+        prediction_function (Callable[[int], int]): Function used for making predictions.
+    """
+    name: str = 'Data Processing'
+    action_markers: List[int] = field(default_factory= lambda: [1, 2])
+    buffer_size: int = 128
+    packet_size: int = 32
+    feature_size: int = 128
+    chunk_offset: int = 196
+    sampling_rate: int = 250
+    filter_function: Callable = None
+    feature_function: Callable = None
+    session_folders: List[str] = field(default_factory= lambda: [])
+    excluded_session_files: List[str] = field(default_factory= lambda: [])
+    channel_column_ids: List[int] = field(default_factory= lambda: [1, 2, 3, 4, 5, 6, 7, 8])
+    use_live_board: bool = False
+    live_board: BoardIds = BoardIds.CYTON_BOARD.value
+    electrode_config: list = field(default_factory= lambda: [])
+    device_port: str = ''
+    prediction_function: Callable = None
+    live_pipeline = None
+
+    separator: str = '\t'
+    dataset_directory: str = 'data/datasets/'
+    helper_files_location: str = 'data/temp/'
+    keep_helper_files: bool = False
+
+
 class DataProcessor:
 
-    def __init__(self, config):
-        self.params = dict(config)
+    def __init__(self, config:Config):
+        self.config = config
+        # self.params = dict(config)
         self.chunk_handlers = {}
         self.readers = {}
 
-        if self.params['use_board_device']:
-            self.readers['live'] = self._create_packet_reader()
-            self.filtered_buffers = {name: deque(maxlen=self.params['ml_prepare_size']) for name in self.params['filter_func'].keys()}
-            self._update_func = self._update_live if not self.params['live_pipeline'] else self._update_live_pipeline
+        if self.config.use_live_board:
+            self.readers['live'] = self._create_live_packet_reader()
+            self.filtered_buffer = deque(maxlen=self.config.feature_size) # maybe it should be buffer_size?
+            self._update_func = self._update_live if not self.config.live_pipeline else self._update_live_pipeline
             self.update = lambda: self._update(self.readers['live'])
         else:
-            files = self.params['session_file']
-            if isinstance(files, str):
-                files = [files]
-            elif not isinstance(files, (list, tuple)):
-                raise TypeError(files)
+            files = []
+            for folder in self.config.session_folders:
+                for file in os.listdir(folder):
+                    skip = 0
+                    for excluded in self.config.excluded_session_files:
+                        if excluded in file:
+                            skip = 1
+                            break
+                    if not skip:
+                        files.append(os.path.join(folder, file))
 
             for file in files:
                 filename = os.path.splitext(os.path.basename(file))[0]
-                self.chunk_handlers[filename] = {name: ChunkHandler(self.params['action_markers'], self.params['sep']) for name in self.params['filter_func'].keys()}
-                self.readers[filename] = PacketReader(file, self.params['packet_size'], self.params['buffer_size'], False, self.params['sep'])
+                self.chunk_handlers[filename] = ChunkHandler(self.config.action_markers, self.config.separator)
+                self.readers[filename] = PacketReader(file, self.config.packet_size, self.config.buffer_size, False, self.config.separator)
+                self.current_dataset = []
 
             self._update_func = self._update_file
 
-        if self.params['save_chunks']:
-            self.params['output_path_chunks'] = os.path.join(self.params['output_path_chunks'], self.params['name'], "")
-            os.makedirs(self.params['output_path_chunks'], exist_ok=True)
-        self.params['output_path_training_data'] = os.path.join(self.params['output_path_training_data'], self.params['name'], "")
-        self.params['output_path_training_dataset'] = os.path.join(self.params['output_path_training_dataset'], self.params['name'], "")
-        os.makedirs(self.params['output_path_training_data'], exist_ok=True)
-        os.makedirs(self.params['output_path_training_dataset'], exist_ok=True)
+        self.output_path = os.path.join(self.config.dataset_directory, self.config.name)
+        os.makedirs(self.output_path, exist_ok=True)
 
     def process(self):
         for filename, reader in self.readers.items():
-            print(filename, reader.data_source)
+            print(filename)
             while self._update(reader):
                 pass
 
@@ -244,24 +283,16 @@ class DataProcessor:
         status = self._update_func(packet, reader.buffer, reader.name)
         return status
 
-    def _create_packet_reader(self):
-        live = False
-        source = self.params['session_file']
-        if self.params['use_board_device']:
-            source = self._open_board()
-            live = True
-            
-        return PacketReader(source, self.params['packet_size'], self.params['buffer_size'], live, self.params['sep'])
+    def _create_live_packet_reader(self):
+        source = self._open_board()
+        return PacketReader(source, self.config.packet_size, self.config.buffer_size, True, self.config.separator)
 
     def _open_board(self):
         params = BrainFlowInputParams()
-        if self.params['synthetic']:
-            board = BoardShim(BoardIds.SYNTHETIC_BOARD, params)
-        else:
-            params.serial_port = params['board_device']
-            board = BoardShim(BoardIds.CYTON_BOARD.value, params)
+        params.serial_port = params['board_device']
+        board = BoardShim(self.config.live_board, params)
         board.prepare_session()
-        for conf in self.params['electrode_config']:
+        for conf in self.config.electrode_config:
             print("Sending", conf)
             board.config_board(conf)
         board.start_stream()
@@ -272,54 +303,41 @@ class DataProcessor:
         pass
 
     def _update_live(self, packet: np.ndarray, buffer: deque, name: str):
-        # print(len(buffer))
         if not packet.size:
             # handle timeouts here
             return 1
         
-        if len(buffer) < self.params['ml_prepare_size']:
+        if len(buffer) < self.config.feature_size:
             return 1
         
-        for filter_name, filter_func in self.params['filter_func'].items():
-            filtered_packet = filter_func(np.array(buffer)[-self.params['filter_size']:], self.params)
-            self.filtered_buffers[filter_name].extend(filtered_packet)
-            if len(self.filtered_buffers[filter_name]) < self.params['ml_prepare_size']:
-                continue
-            for func_name, func in self.params['ml_prepare_func'].items():
-                data = func(np.array(self.filtered_buffers[filter_name])[-self.params['ml_prepare_size']:], self.params)
-                for pfunc in self.params['prediction_functions']:
-                    pfunc(data, self.params)
+        # filtered_packet = self.config.filter_function(np.array(buffer)[-self.config.filter_size:], self.config)
+        self.filtered_buffer.extend(packet)
+        if len(self.filtered_buffer) < self.config.feature_size:
+            return 1
+
+        data = self.config.feature_function(np.array(self.filtered_buffer)[-self.config.feature_size:], self.config)
+        self.config.prediction_function(data, self.config)
 
 
     def _update_file(self, packet: np.ndarray, buffer: deque, name: str):
-        chunk_handlers = self.chunk_handlers[name]
-
+        chunk_handler = self.chunk_handlers[name]
         if not packet.size:
-            if self.params['save_training_dataset']:
-                return self.create_training_sets(name)
-            return 0
-        
-        for filter in self.params['filter_func']:
-            filtered_packet = self.params['filter_func'][filter](np.array(buffer)[-self.params['filter_size']:], self.params)
-            chunk = chunk_handlers[filter].process_data_packet(filtered_packet)
-            if not chunk['complete']:
-                continue
+            return self.create_training_sets(name)
 
-            if self.params['save_chunks']:
-                path = os.path.join(self.params['output_path_chunks'], name, filter)
-                os.makedirs(path, exist_ok=True)
-                chunk_name = f"{chunk['label']}_{chunk['counter']}.csv"
-                save_to_file(chunk['data'], path, chunk_name, self.params['sep'])
-            for func in self.params['ml_prepare_func']:
-                data = self._iterate_chunk(chunk, self.params['ml_prepare_func'][func])
+        # filtered_packet = self.config.filter_function(np.array(buffer)[-self.config.packet_size:, ], self.config)
+        filtered_packet = self.config.filter_function(np.array(buffer), self.config)[-self.config.packet_size:]
+        # filtered_packet = self.config.filter_function(np.array(buffer), self.config)
+        chunk = chunk_handler.process_data_packet(filtered_packet)
+        if not chunk['complete']:
+            return 1
 
-                path = os.path.join(self.params['output_path_training_data'], filter+'_'+func+'/')
-                os.makedirs(path, exist_ok=True)
-                # print(path)
-                for idx, ml_packet in enumerate(data):
-                    for data_name, ml_packet_data in ml_packet['data'].items():
-                        name = f"{ml_packet['label']}_{ml_packet['counter']}_{idx}_{data_name}.csv"
-                        save_to_file(ml_packet_data, path, name, self.params['sep'])
+        data = self._iterate_chunk(chunk, self.config.feature_function)
+
+        for idx, ml_packet in enumerate(data):
+            for data_name, ml_packet_data in ml_packet['data'].items():
+                name = f"{ml_packet['label']}_{ml_packet['counter']}_{idx}_{data_name}.csv"
+                # save_to_file(ml_packet_data, path, name, self.config.separator)
+                self.current_dataset.append([ml_packet['label'], ml_packet['counter'], idx, data_name, ml_packet_data])
 
         return 1
 
@@ -327,36 +345,28 @@ class DataProcessor:
         output_data = []
         chunk_data = chunk['data']
         label = chunk['label']
-        i = self.params['ml_prepare_chunk_start_offset']
+        i = self.config.chunk_offset
         
         while i < len(chunk_data):
-            i = i + self.params['packet_size']
+            i = i + self.config.packet_size
             end_index = i
-            start_index = end_index - self.params['ml_prepare_size']
+            start_index = end_index - self.config.feature_size
 
             if end_index > len(chunk_data):
                 break
 
-            data = chunk_data.iloc[start_index:end_index, self.params['channel_column_ids'] + self.params['ml_prepare_extra_columns']]
+            data = chunk_data.iloc[start_index:end_index, :]
 
-            output = {'data': func(data, self.params), 'label': label, 'counter': chunk['counter']}
+            output = {'data': func(data, self.config), 'label': label, 'counter': chunk['counter']}
             output_data.append(output)
 
         return output_data
 
     def create_training_sets(self, filename):
-        for filter in self.params['filter_func'].keys():
-            for func in self.params['ml_prepare_func'].keys():
-                input_dir = os.path.join(self.params['output_path_training_data'], filter+'_'+func+'/')
-                # print(input_dir)
-                data = create_training_data(input_dir, self.params['action_markers'], {}, self.params['sep'])
-                path = os.path.join(self.params['output_path_training_dataset'], filter+'_'+func+'/')
-                os.makedirs(path, exist_ok=True)
-                output_file = os.path.join(path, f"{self.params['name']}_{filename}_{filter}_{func}.pickle")
-                with open(output_file, 'wb') as f:
-                    pickle.dump(data, f)
+        data = create_training_data(self.current_dataset, self.config.action_markers, {}, self.config.separator)
+        output_file = os.path.join(self.output_path, f"dataset_{filename}.pickle")
+        with open(output_file, 'wb') as f:
+            pickle.dump(data, f)
 
-            if not self.params['keep_seperate_training_data']:
-                shutil.rmtree(os.path.join(self.params['output_path_training_data'], filter+'_'+func+'/'))
-
+        self.current_dataset = []
         return 0

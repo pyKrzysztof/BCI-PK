@@ -162,6 +162,8 @@ def split_dataset(dataset, split, preshuffle=False, postshuffle=True, grouped=Tr
             if postshuffle:
                 rd.shuffle(dataset_1[group_label])
                 rd.shuffle(dataset_2[group_label])
+
+            # print(group_data[split_index:split_index+2])
             assert group_data[split_index:] != dataset_1[group_label]
             assert group_data[:split_index] != dataset_2[group_label]
     else:
