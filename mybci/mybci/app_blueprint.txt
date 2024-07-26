@@ -1,0 +1,50 @@
+import multiprocessing
+import dearpygui.dearpygui as dpg
+
+from mybci.system import System
+from mybci.system_gui import SystemGUIManager, DataProcessor
+
+
+
+def my_gui(sys_manager: SystemGUIManager, kwargs:dict = {}):
+    pass
+
+def my_mainloop(sys_manager: SystemGUIManager, kwargs:dict = {}):
+    pass
+
+
+
+
+def system_gui_thread(thread_data):
+    app = SystemGUIManager(System().load_system(), thread_data)
+    
+    custom_kwargs = {} # my_params
+    app.create_gui(my_gui, custom_kwargs)
+    app.mainloop_gui(my_mainloop, custom_kwargs)
+
+def main_data_thread(thread_data):
+    processor = DataProcessor(thread_data)
+    while processor.update():
+        pass
+
+def main():
+
+    data_manager = multiprocessing.Manager()
+    data = data_manager.dict()
+    data['raw'] = data_manager.Queue()
+    data["processed"] = data_manager.Queue() 
+    data["cmd_tx"] = data_manager.Queue() # commands coming FROM the GUI
+    data["cmd_rx"] = data_manager.Queue() # commands coming FROM the main thread.
+    data["event_end"] = data_manager.Event()
+
+    gui_process = multiprocessing.Process(target=system_gui_thread, args=(data,))
+    gui_process.start()
+
+    main_data_thread(data)
+
+    gui_process.join()
+
+
+
+if __name__ == "__main__":
+    main()

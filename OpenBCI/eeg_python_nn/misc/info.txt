@@ -1,5 +1,0 @@
- ls -lh /dev/ttyUSB0
-
-linux ftdi fix: change 16 to 1 in:
-sudo nano /sys/bus/usb-serial/devices/ttyUSB0/latency_timer
-
