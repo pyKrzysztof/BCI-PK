@@ -1,9 +1,0 @@
-{
-    "actions": ["L", "R"],
-    "time_between_actions_min": 4,
-    "time_between_actions_max": 6,
-    "n_samples": 8,
-    "call_on_enter": "sound_player.init",
-    "call_on_action": "sound_player.play",
-    "call_on_exit": "sound_player.close"
-}

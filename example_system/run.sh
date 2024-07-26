@@ -1,0 +1,1 @@
+python -i -c "from mybci.system import System;sys = System.load_system();print('System loaded into variable <sys>.')"
