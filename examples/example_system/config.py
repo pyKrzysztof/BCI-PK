@@ -3,7 +3,7 @@ from mybci.feature_extraction import Filters, Features
 from brainflow import BoardIds
 
 config = SystemConfig()
-config.path = "/home/chris/workspace/BCI-PK/system_example/"
+config.path = "/home/chris/workspace/mybci-lab/examples/example_system/"
 config.name = "Data Processing"
 config.board_type = BoardIds.CYTON_BOARD
 config.board_port = "/dev/ttyUSB0"
@@ -20,6 +20,6 @@ config.electrode_config = []
 
 config.filters = [(Filters.BANDPASS, 1, 45, 3, 250), (Filters.BANDSTOP, 49, 51, 4, 250), (Filters.WAVELET_DENOISE, 3)]
 
-config.features = []
+config.features = [Features.WAVELETS, ]
 
 config.separator = "	"
