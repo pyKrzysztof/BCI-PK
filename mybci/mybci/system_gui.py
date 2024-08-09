@@ -153,6 +153,7 @@ class SystemGUIManager:
                     custom_callbacks = False # to be implemented, currently redundant with reinforcement.
 
                     pipeline_settings = {
+                        "config": self.system.config,
                         "n": dpg.get_value("reps"),
                         "actions": dpg.get_value("actions-train"),
                         "t_min": dpg.get_value("action-t0"),
@@ -161,7 +162,11 @@ class SystemGUIManager:
                         "on_init": None if not custom_callbacks else "",
                         "on_exit": None if not custom_callbacks else "",
                         "on_action": None if not custom_callbacks else "",
-                        "finish_callback": True
+                        "finish_callback": True,
+                        "connect": {
+                            "board_port": self.system.config.board_port,
+                            "board_id": dpg.get_value("board-id-selector")
+                        },
                     }
 
                     dpg.disable_item("record-button")
@@ -189,6 +194,8 @@ class SystemGUIManager:
                     index = int(index)
 
                     print(base, index, self.system.model_handler.model_dict[base][index])
+
+
 
                 dpg.add_text(label="Existing models for selected base:")
                 dpg.add_listbox(tag="model-selector", callback= lambda a, s: model_selector_callback(s), width=-1)
@@ -275,6 +282,12 @@ class SystemGUIManager:
                 for i, channel in enumerate(self.system.config.channels_eeg):
                     self.live_eeg_data[i].extend(board_data[channel])
                 self.update_eeg_window(self.live_eeg_data, raw_data_count)
+
+            if queue_updates["cmd"] is not None:
+                cmd = queue_updates["cmd"]
+                print(cmd)
+                if cmd[0] == "reinforcement":
+                    status = cmd[1]
 
             if custom_mainloop_handle is not None:
                 custom_mainloop_handle(self, kwargs)

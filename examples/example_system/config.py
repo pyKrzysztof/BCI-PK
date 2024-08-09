@@ -9,6 +9,7 @@ config.board_type = BoardIds.CYTON_BOARD
 config.board_port = "/dev/ttyUSB0"
 
 config.actions = ["Pull", "Push", "Relax"]
+config.action_identifiers = {"Pull": 1, "Push": 2, "Relax": 3}
 config.packet_size = 32
 config.feature_size = 128
 config.sampling_rate = 250

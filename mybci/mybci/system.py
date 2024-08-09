@@ -9,13 +9,14 @@ import sys
 import time
 import stat
 import pickle
+import random
 import pathlib
 import datetime
 import importlib
+import threading
 from keras.src.models import Model
 import numpy as np
 import pandas as pd
-
 import tensorflow as tf
 from keras import models
 from collections import deque
@@ -37,6 +38,7 @@ class SystemConfig:
     board_port: str = '/dev/ttyUSB0'
 
     actions: list[str] = field(default_factory = lambda: [])
+    action_identifiers: dict[str, int] = field(default_factory = lambda: {})
     packet_size: int = 32
     feature_size: int = 128
     sampling_rate: int = 250
@@ -238,7 +240,106 @@ class ModelHandler:
 
 
 
+class TimetableEntry:
+    def __init__(self, delta_time, action):
+        self.delta_time = delta_time
+        self.action = action
 
+
+
+class TimetableGenerator:
+    def __init__(self, actions: List[str], min_time: float, max_time: float, n_samples: int):
+        self.actions = actions
+        self.min_time = min_time
+        self.max_time = max_time
+        self.n_samples = n_samples
+
+    def generate_timetable(self):
+        timetable = []
+        for action in self.actions:
+            for _ in range(self.n_samples):
+                delta_time = random.uniform(self.min_time, self.max_time)
+                timetable.append(TimetableEntry(delta_time, action))
+        random.shuffle(timetable)  # Shuffle to ensure randomness in sequence
+        return timetable
+
+
+
+class ActionExecutor(threading.Thread):
+    def __init__(self, action_name, action_function, on_complete: Callable):
+        threading.Thread.__init__(self)
+        self.action_name = action_name
+        self.action_function = action_function
+        self.on_complete = on_complete
+
+    def run(self):
+        self.action_function()  # Simulate the action
+        self.on_complete()  # Notify when done
+
+
+
+# Process the pipeline and trigger actions based on current time
+class PipelineProcessor:
+
+
+    def __init__(self, timetable: List[TimetableEntry], action_identifiers: dict):
+        self.timetable = timetable
+        self.marker_insert_function = lambda *_: None
+        self.action_identifiers = action_identifiers
+        self.current_index = 0
+        self.last_action_end_time = datetime.datetime.now()  # When the last action completed
+        self.action_in_progress = False
+        self.current_action = 0
+        self.pending_markers = []  # Store pending markers for insertion in the main thread
+        self.action_callback_func = lambda action: None
+
+    def process_pipeline(self, current_time: datetime.datetime):
+        # Insert any pending markers from the main thread
+        while self.pending_markers:
+            marker = self.pending_markers.pop(0)  # Remove from front
+            self.marker_insert_function(marker)
+            # print(f"Inserting marker {marker}")
+
+        # Calculate the time since the last action ended
+        time_since_last_action = (current_time - self.last_action_end_time).total_seconds()
+
+        if not self.action_in_progress:
+            if self.current_index < len(self.timetable):
+                time_to_next_action = self.timetable[self.current_index].delta_time
+
+                # If enough time has passed, start the next action
+                if time_since_last_action >= time_to_next_action:
+                    self.start_next_action()
+            else:
+                return 1
+
+    def start_next_action(self):
+        entry = self.timetable[self.current_index]
+        action_identifier = self.action_identifiers[entry.action]  # Unique identifier for the action
+
+        # Queue the start marker for the main thread to insert
+        self.pending_markers.append(action_identifier)
+
+        def on_action_complete():
+            # Queue the end marker for the main thread to insert
+            # print(f"Finishing action {action_identifier}")
+            self.pending_markers.append(-action_identifier)
+            self.action_in_progress = False
+            # Update the last action's end time
+            self.last_action_end_time = datetime.datetime.now()
+
+        action_executor = ActionExecutor(
+            entry.action,
+            lambda: self.action_callback_func(entry.action),
+            on_action_complete
+        )
+        action_executor.start()
+        self.action_in_progress = True
+        self.current_action = action_identifier
+        self.current_index += 1
+
+    def set_marker_function(self, func):
+        self.marker_insert_function = func
 
 
 
@@ -268,6 +369,9 @@ class DataProcessor:
         self.queue_cmd_rx: Queue = data['cmd_tx']
         self.end_event: Event = data['event_end']
 
+        self.stream_start_time = 0
+        self.pipeline_end_flag = 0
+        self.ongoing_pipeline = 0
 
     def update(self):
         self.process_commands()
@@ -321,7 +425,7 @@ class DataProcessor:
 
         name = str(datetime.datetime.now()).replace(" ", "_").replace(":", "-")
         self.board_handle.add_streamer(f"file://data/temp/raw_{name}.csv:w")
-
+        # print(params)
         stream_type = params["session"]
         config:SystemConfig = params["config"]
         overlap = False
@@ -331,8 +435,44 @@ class DataProcessor:
             self.stream_reader = DataReader(self.board_handle, config.packet_size, config.feature_size, config.separator)
             self.stream_runner = lambda: self.stream_process(send_raw=params["send_raw"], send_processed=params["send_processed"], send_features=params["send_features"], overlap=overlap, filters=config.filters, features=config.features, eeg_channels=config.channels_eeg)
 
+        if stream_type == "pipeline":
+            # run the pipeline here.
+            pipeline_config = params["pipeline_config"]
+            # print(pipeline_config)
+            actions = [action.strip() for action in pipeline_config["actions"].split(",")]
+            # action_indetifiers = [params['config']['action_identifiers'][action] for action in actions]
+            t0 = pipeline_config["t_min"]
+            t1 = pipeline_config["t_max"]
+            n = pipeline_config["n"]
+            t_between = (2, 3)
+            generator = TimetableGenerator(actions, t_between[0], t_between[1], n)
+            timetable = generator.generate_timetable()
+            pipeline = PipelineProcessor(timetable, params["config"].action_identifiers)
+            pipeline.set_marker_function(self.board_handle.insert_marker)
+
+            def internal_action_function(action, t_min, t_max):
+                delay = random.uniform(t_min, t_max)
+                print(action)
+                self.queue_cmd_tx.put_nowait(("reinforcement", "start", action))
+                time.sleep(delay)
+                self.queue_cmd_tx.put_nowait(("reinforcement", "end", action))
+                print("action end.")
+
+            pipeline.action_callback_func = lambda action: internal_action_function(action, t0, t1)
+            self.stream_reader = DataReader(self.board_handle, config.packet_size, config.feature_size, config.separator)
+
+            self.stream_runner = lambda: self.pipeline_process(
+                pipeline=pipeline,
+                pipeline_config=params["pipeline_config"],
+                send_processed=True,
+                send_features=True,
+                filters=config.filters,
+                features=config.features,
+                eeg_channels=config.channels_eeg,
+            )
 
         self.board_handle.start_stream()
+        self.stream_start_time = datetime.datetime.now()
         self.board_streaming = True
 
 
@@ -365,13 +505,61 @@ class DataProcessor:
                     print(f"Filtering time: {(end_time - start_time)*1000:.3f} ms")
 
                     try:
-                        self.queue_raw.put_nowait(filtered_data if not overlap else filtered_data[-self.stream_reader.packet_size:])
+                        self.queue_processed.put_nowait(filtered_data if not overlap else filtered_data[-self.stream_reader.packet_size:])
                     except:
                         pass
 
                 if send_features:
-
                     pass
+
+    def pipeline_process(self, pipeline:PipelineProcessor, pipeline_config:dict, send_processed:bool, send_features:bool, filters, features, eeg_channels):
+        packet = self.stream_reader.get_data_packet()
+        overlap = False
+
+        if packet.shape[0] != 0:
+            # self.queue_raw.put_nowait(packet)
+            now = datetime.datetime.now()
+
+            if (send_features or send_processed):
+                # Returns a <feature_size> sized array of data.
+                # If overlap is true it will return a full array with every new packet,
+                # If overlap is false it will only return once every <feature_size/packet_size> packets.
+                feature_size_packet = self.stream_reader.get_feature_size_packet(overlap)
+                filtered_data = np.array(feature_size_packet, order="C")
+
+                start_time = time.perf_counter()
+
+                if send_processed and feature_size_packet.shape[0] != 0:
+                    for filter in filters:
+                        filter_function = get_filter_function(filter)
+                        for channel in eeg_channels:
+                            filter_function(filtered_data[channel])
+
+                    end_time = time.perf_counter()
+
+                    print(f"Filtering time: {(end_time - start_time)*1000:.3f} ms")
+
+                    try:
+                        self.queue_processed.put_nowait(filtered_data)
+                        # self.queue_raw.put_nowait(filtered_data)
+                    except:
+                        pass
+
+                    if send_features:
+                        # process the features
+                        # send to features_queue with action index
+                        if pipeline.action_in_progress:
+                            print(pipeline.current_action)
+
+            if self.pipeline_end_flag:
+                self.ongoing_pipeline = 0
+                self.pipeline_end_flag = 0
+                self.disconnect()
+                self.queue_cmd_tx.put_nowait(("pipeline", 1))
+                return
+
+            self.pipeline_end_flag = pipeline.process_pipeline(now)
+
 
 
     def stop_stream(self):
@@ -381,6 +569,9 @@ class DataProcessor:
             self.board_streaming = False
 
     def disconnect(self):
+        if self.ongoing_pipeline:
+            self.queue_cmd_tx.put_nowait(("pipeline", 0))
+
         self.stop_stream()
         self.board_connected = False
         self.board_handle = None
@@ -398,7 +589,11 @@ class DataProcessor:
             self.disconnect()
 
         if cmd == "pipeline":
+            params = {"session": "pipeline", "config": data["config"], "pipeline_config": data} # type: ignore
+            self.connect(data["connect"]) # type: ignore
+            self.start_stream(params)
             print("Pipeline recording request:", data)
+
 
     def get_cmd(self):
         try:
